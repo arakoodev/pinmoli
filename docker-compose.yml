@@ -1,0 +1,26 @@
+services:
+  drachtio:
+    image: drachtio/drachtio-server:latest
+    ports:
+      - "5060:5060/udp"
+      - "5060:5060/tcp"
+    environment:
+      - DRACHTIO_SECRET=cymru
+    command: ["drachtio", "--daemon", "--loglevel", "info"]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - drachtio
+    ports:
+      - "3000:3000"
+      - "10000:10000/udp"
+    volumes:
+      - ./frontend:/app
+    environment:
+      - NODE_ENV=development
+    # Ensure any packages installed via shell inside the container are owned by the current user
+    user: "${UID:-1000}:${GID:-1000}"
+    command: npm run dev
