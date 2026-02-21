@@ -1,5 +1,6 @@
 import sip from 'sip';
 import os from 'os';
+import http from 'http';
 
 const networkInterfaces = os.networkInterfaces();
 let localIp = '127.0.0.1';
@@ -9,6 +10,16 @@ for (const interfaceName in networkInterfaces) {
       localIp = iface.address;
     }
   }
+}
+
+function getPublicIp() {
+  return new Promise((resolve) => {
+    http.get('http://ifconfig.me/ip', { timeout: 5000 }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => resolve(data.trim()));
+    }).on('error', () => resolve(localIp));
+  });
 }
 
 const host = '5eezfwavhxe.sip.livekit.cloud';
@@ -30,45 +41,42 @@ const extensions = [
   'hello'
 ];
 
-sip.start({ port: 5060 }, (request) => {});
-
-async function testExtension(ext) {
+async function testExtension(ext, publicIp) {
   return new Promise((resolve) => {
     console.log(`
 Testing extension: ${ext}`);
-    const callId = Math.floor(Math.random() * 1000000).toString() + '@' + localIp;
-    
+    const callId = Math.floor(Math.random() * 1000000).toString() + '@' + publicIp;
+
     const sdp = [
       'v=0',
-      'o=- 123456 123456 IN IP4 ' + localIp,
+      'o=- 123456 123456 IN IP4 ' + publicIp,
       's=-',
-      'c=IN IP4 ' + localIp,
+      'c=IN IP4 ' + publicIp,
       't=0 0',
       'm=audio 10000 RTP/AVP 0',
       'a=rtpmap:0 PCMU/8000',
       'a=sendrecv'
-    ].join('\\r\\n') + '\\r\\n';
+    ].join('\r\n') + '\r\n';
 
     const req = {
       method: 'INVITE',
       uri: `sip:${ext}@${host}`,
       headers: {
         to: { uri: `sip:${ext}@${host}` },
-        from: { uri: `sip:tester@${localIp}`, params: { tag: Math.floor(Math.random() * 1000000).toString() } },
+        from: { uri: `sip:tester@${publicIp}`, params: { tag: Math.floor(Math.random() * 1000000).toString() } },
         'call-id': callId,
         cseq: { method: 'INVITE', seq: 1 },
-        contact: [{ uri: `sip:tester@${localIp}:5060;transport=tcp` }],
+        contact: [{ uri: `sip:tester@${publicIp}:5060` }],
         'max-forwards': 70,
         'content-type': 'application/sdp',
+        allow: 'INVITE, ACK, BYE, CANCEL, OPTIONS',
       },
       content: sdp
     };
 
     let resolved = false;
 
-    // Timeout quickly if it just rings forever (LiveKit takes 60s to 503, we don't want to wait that long for all)
-    // Wait, if it rings, the agent has 60 seconds to answer. If we timeout early, we might miss it.
-    // Let's wait 15 seconds per extension.
+    // Wait 15 seconds per extension
     const timer = setTimeout(() => {
       if (!resolved) {
         console.log(`Timeout on ${ext} (Agent didn't answer in 15s)`);
@@ -100,8 +108,11 @@ Testing extension: ${ext}`);
 }
 
 async function run() {
+  const publicIp = await getPublicIp();
+  sip.start({ port: 5060, publicAddress: publicIp }, () => {});
+
   for (const ext of extensions) {
-    const success = await testExtension(ext);
+    const success = await testExtension(ext, publicIp);
     if (success) {
       console.log('Found a working extension! Exiting.');
       process.exit(0);

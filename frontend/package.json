@@ -13,6 +13,7 @@
   "dependencies": {
     "clsx": "^2.1.1",
     "drachtio-srf": "^5.0.18",
+    "livekit-server-sdk": "^2.15.0",
     "lucide-react": "^0.575.0",
     "next": "16.1.6",
     "react": "19.2.3",

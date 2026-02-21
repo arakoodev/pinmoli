@@ -1,6 +1,9 @@
 import { Server } from 'socket.io';
 import { spawn } from 'child_process';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let io;
 
@@ -14,50 +17,103 @@ export function initSocketServer(httpServer) {
 
   io.on('connection', (socket) => {
     console.log('Client connected to UI logging socket');
+    let activeProcess = null;
 
     socket.on('start-test', (data) => {
-      console.log('Starting LiveKit agent test from UI:', data);
-      
-      socket.emit('log', { type: 'info', message: 'Initiating test container process...' });
-      
-      const testProcess = spawn('node', ['test-agent.mjs'], {
-        cwd: process.cwd()
+      console.log('Starting test from UI:', data);
+
+      // Kill any existing test process for this socket
+      if (activeProcess) {
+        activeProcess.kill();
+        activeProcess = null;
+      }
+
+      // Encode params as base64 JSON for the sip-engine child process
+      const params = {
+        method: data.method || 'OPTIONS',
+        uri: data.uri || 'sip:agent@example.com',
+        transport: data.transport || 'auto',
+        headers: data.headers || {},
+        sdp: {
+          codecs: data.codecs || ['opus', 'PCMU'],
+          mediaPort: data.mediaPort || 10000,
+          customSdp: data.customSdp || null,
+        },
+        audio: data.audio || { source: 'silence', duration: 5 },
+        auth: data.auth || {},
+      };
+
+      const paramsB64 = Buffer.from(JSON.stringify(params)).toString('base64');
+      const enginePath = path.join(__dirname, 'src', 'lib', 'sip-engine.mjs');
+
+      socket.emit('log', {
+        type: 'info',
+        event: 'init',
+        message: `Initiating ${params.method} to ${params.uri}...`,
+        timestamp: Date.now(),
       });
 
-      testProcess.stdout.on('data', (data) => {
-        const output = data.toString();
-        
-        // Custom parsing to categorize LiveKit SIP behavior for the UI
-        if (output.includes('180 Ringing')) {
-          socket.emit('log', { type: 'success', message: '-> 180 Ringing: LiveKit dispatch rule matched. Room created. Waiting for Agent to join...' });
-        } else if (output.includes('200 OK')) {
-          socket.emit('log', { type: 'success', message: '-> 200 OK: Agent joined the room and answered!' });
-        } else if (output.includes('503 Service Unavailable')) {
-          socket.emit('log', { 
-            type: 'error', 
-            message: `-> 503 Service Unavailable / Connection Dropped
+      const testProcess = spawn('node', [enginePath, paramsB64], {
+        cwd: __dirname,
+      });
+      activeProcess = testProcess;
 
-DIAGNOSIS: The LiveKit SIP Proxy successfully routed the call to a room (as proven by the 180 Ringing), but the connection was dropped. This occurs because the remote LiveKit Agent failed to join the room and publish an audio track within the 60-second SIP timeout window.
+      // Buffer partial lines from stdout
+      let stdoutBuffer = '';
+      testProcess.stdout.on('data', (chunk) => {
+        stdoutBuffer += chunk.toString();
+        const lines = stdoutBuffer.split('\n');
+        // Keep the last incomplete line in the buffer
+        stdoutBuffer = lines.pop() || '';
 
-ACTION REQUIRED: Please verify your LiveKit Agent worker is running, not crashing, and is configured to listen to the correct dispatch rule room prefix.` 
-          });
-        } else {
-          socket.emit('log', { type: 'info', message: output.trim() });
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line);
+            socket.emit('log', event);
+          } catch {
+            // Non-JSON output — send as plain info
+            socket.emit('log', { type: 'info', message: line.trim(), timestamp: Date.now() });
+          }
         }
       });
 
-      testProcess.stderr.on('data', (data) => {
-        const errorMsg = data.toString().trim();
-        // Ignore standard Node.js event emitter warnings from the sip library disconnection
-        if (!errorMsg.includes('Error: remote peer disconnected')) {
-          socket.emit('log', { type: 'error', message: errorMsg });
-        }
+      testProcess.stderr.on('data', (chunk) => {
+        const msg = chunk.toString().trim();
+        // Ignore known noisy errors from sip library disconnections
+        if (msg.includes('Error: remote peer disconnected')) return;
+        if (msg.includes('MaxListenersExceededWarning')) return;
+        socket.emit('log', { type: 'error', message: msg, timestamp: Date.now() });
       });
 
       testProcess.on('close', (code) => {
-        socket.emit('log', { type: 'system', message: `Test process exited with code ${code}` });
+        // Flush remaining buffer
+        if (stdoutBuffer.trim()) {
+          try {
+            socket.emit('log', JSON.parse(stdoutBuffer));
+          } catch {
+            socket.emit('log', { type: 'info', message: stdoutBuffer.trim(), timestamp: Date.now() });
+          }
+        }
+        activeProcess = null;
         socket.emit('test-complete', { code });
       });
+    });
+
+    socket.on('stop-test', () => {
+      if (activeProcess) {
+        activeProcess.kill();
+        activeProcess = null;
+        socket.emit('log', { type: 'system', message: 'Test stopped by user.', timestamp: Date.now() });
+        socket.emit('test-complete', { code: -1 });
+      }
+    });
+
+    socket.on('disconnect', () => {
+      if (activeProcess) {
+        activeProcess.kill();
+        activeProcess = null;
+      }
     });
   });
 

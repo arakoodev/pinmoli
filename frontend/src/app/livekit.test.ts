@@ -1,15 +1,38 @@
 import { describe, it, expect } from 'vitest';
 import sip from 'sip';
+import http from 'http';
+import os from 'os';
+
+// Detect local IP
+const nets = os.networkInterfaces();
+let localIp = '127.0.0.1';
+for (const name in nets) {
+  for (const iface of nets[name]!) {
+    if (iface.family === 'IPv4' && !iface.internal) {
+      localIp = iface.address;
+    }
+  }
+}
+
+function getPublicIp(): Promise<string> {
+  return new Promise((resolve) => {
+    http.get('http://ifconfig.me/ip', { timeout: 5000 }, (res) => {
+      let data = '';
+      res.on('data', (chunk: string) => (data += chunk));
+      res.on('end', () => resolve(data.trim()));
+    }).on('error', () => resolve(localIp));
+  });
+}
 
 describe('LiveKit SIP Trunk Connection', () => {
   it('should successfully send an OPTIONS request and receive a 200 OK', () => {
-    return new Promise<void>((resolve, reject) => {
+    return new Promise<void>(async (resolve, reject) => {
       // Parse the endpoint from .env, or fallback to the one we know for testing
       const endpoint = process.env.LIVEKIT_ENDPOINT || 'sip:5eezfwavhxe.sip.livekit.cloud';
-      const host = endpoint.replace('sip:', '');
+      const publicIp = await getPublicIp();
 
       // Initialize the sip stack
-      sip.start({ port: 5060 }, (request) => {
+      sip.start({ port: 5060, publicAddress: publicIp }, () => {
         // Drop any unexpected incoming requests
       });
 

@@ -1,36 +1,134 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Postman for Voice
 
-## Getting Started
+General-purpose developer workspace for testing, debugging, and building real-time voice applications. Provides a web UI for SIP signaling (INVITE, REGISTER, OPTIONS), real-time diagnostic logging, SDP inspection, and audio injection/RTP streaming against any SIP platform.
 
-First, run the development server:
+## Quick Start
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# Start the full stack (frontend + drachtio SIP server)
+docker compose up
+
+# Open http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Features
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- **Request Builder** — Method selector (INVITE/REGISTER/OPTIONS), URI input, transport picker (UDP/TCP/Auto)
+- **Platform Presets** — 1-click configuration for LiveKit Cloud, Daily.co, Twilio, Asterisk, Generic SIP
+- **Custom Headers** — Key-value editor with autocomplete for common SIP headers
+- **SDP / Codec Picker** — Checkbox selection (Opus, PCMU, PCMA, G.722) with raw SDP override
+- **SIP Timeline** — Visual transaction timeline with expandable headers, direction arrows, elapsed timestamps, color-coded status codes
+- **SDP Diff View** — Side-by-side offer/answer comparison with codec badges, IP highlighting, issue detection
+- **Diagnostic Insights** — Auto-detects common SIP problems (hostname in Via, private IPs, agent timeout, missing ACK)
+- **Audio Injection** — Silence, tone generator, text-to-speech (espeak-ng), or file upload streamed via FFmpeg/RTP
+- **Collections & History** — Save/load request configs, auto-save last 50 runs, JSON export/import
+- **SIP Authentication** — Username/password for REGISTER (Digest auth)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Development
 
-## Learn More
+```bash
+npm run dev      # Dev server (node server.js) with Socket.io on port 3000
+npm run build    # Next.js production build
+npm run lint     # ESLint (includes SIP correctness rules)
+npm test         # Vitest
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Architecture
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```
+frontend/
+├── src/
+│   ├── app/
+│   │   └── page.tsx              # Main workspace — composes all components
+│   ├── components/
+│   │   ├── SipTimeline.tsx       # Visual SIP message timeline
+│   │   ├── SdpDiff.tsx           # Offer/answer SDP comparison
+│   │   ├── DiagnosticInsights.tsx # Auto-detected protocol issues
+│   │   ├── HeaderEditor.tsx      # Key-value SIP header editor
+│   │   ├── CodecPicker.tsx       # Codec selection + raw SDP editor
+│   │   ├── AudioControls.tsx     # Audio source configuration
+│   │   ├── PresetSelector.tsx    # Platform preset dropdown
+│   │   └── Sidebar.tsx           # Collections & history browser
+│   └── lib/
+│       ├── sip-engine.mjs        # Unified parameterized SIP test runner
+│       ├── presets.ts             # Platform preset definitions
+│       └── collections.ts        # Save/load collections (localStorage)
+├── server.js                      # HTTP server + Next.js + Socket.io init
+├── server.mjs                     # Socket.io event handlers, spawns sip-engine
+├── test-*.mjs                     # Standalone SIP test scripts (reference)
+└── eslint-plugin-sip.mjs          # Custom ESLint rules (9 rules)
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Data Flow
 
-## Deploy on Vercel
+1. User configures request in the UI (method, URI, headers, codecs, audio)
+2. Click "Run" sends params via Socket.io `start-test` event
+3. `server.mjs` encodes params as base64 JSON, spawns `sip-engine.mjs` as child process
+4. Engine streams structured JSON events to stdout (SIP messages, diagnostics, media stats)
+5. `server.mjs` parses JSON lines and relays them to the browser via Socket.io `log` events
+6. UI components render events as timeline, SDP diff, and diagnostic insights
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## SIP Lint Rules
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Custom ESLint plugin (`eslint-plugin-sip.mjs`) with 9 rules — all extracted from real bugs that silently broke SIP call flows.
+
+### Protocol Correctness
+
+| Rule | Severity | Description |
+|------|----------|-------------|
+| `sip/no-sip-dialog` | error | `sip.dialog()` does not exist in sip v0.0.6. Manually construct ACK/BYE. |
+| `sip/no-unroutable-sdp-ip` | error | Flags `0.0.0.0` and `1.1.1.1` in strings. Use real IPs from `os.networkInterfaces()`. |
+| `sip/no-literal-crlf-escape` | error | Flags literal `\r\n` (4 chars) that should be actual CRLF (2 chars). |
+| `sip/require-allow-in-invite` | warn | INVITE without `Allow` header (RFC 3261 Section 20.5 SHOULD). |
+
+### Docker / NAT Awareness
+
+| Rule | Severity | Description |
+|------|----------|-------------|
+| `sip/require-public-address` | error | `sip.start()` without `publicAddress` → Docker container ID in Via header. |
+| `sip/no-local-ip-in-sip-uri` | error | `localIp` in `sip:` URI templates → private Docker IPs in Contact/From. |
+
+### Code Quality (SIP-specific)
+
+| Rule | Severity | Description |
+|------|----------|-------------|
+| `sip/no-spread-in-sip-headers` | error | Spread elements after critical SIP headers can silently overwrite `to`, `from`, `call-id`, `cseq`. |
+| `sip/no-sdp-lf-join` | error | SDP arrays joined with `\n` instead of `\r\n` — violates RFC 4566. |
+| `sip/no-random-sip-port` | error | `Math.random()` for SIP port → Contact header advertises unreachable port. |
+
+### Running the linter
+
+```bash
+# Inside Docker (preferred)
+docker compose exec frontend npm run lint
+
+# Or locally
+npm run lint
+```
+
+Rules apply to `test-*.mjs`, `src/**/*.test.ts`, and `src/lib/sip-engine.mjs`.
+
+## Testing
+
+```bash
+# Unit tests (Vitest)
+docker compose exec frontend npm test
+
+# Full agent media test
+docker compose exec frontend node test-agent.mjs
+
+# Individual SIP test scripts
+docker compose exec frontend node test-sip.mjs        # OPTIONS ping
+docker compose exec frontend node test-rtp.mjs         # RTP media
+docker compose exec frontend node scan-extensions.mjs  # Extension discovery
+```
+
+## Platform Presets
+
+| Preset | URI Pattern | Notes |
+|--------|------------|-------|
+| LiveKit Cloud | `sip:+NUMBER@ID.sip.livekit.cloud` | Proven INVITE/ACK/BYE flow |
+| Daily.co | `sip:ROOM@sip.daily.co` | Daily SIP interconnect |
+| Twilio Elastic SIP | `sip:NUMBER@ACCOUNT.pstn.twilio.com` | REGISTER required |
+| Asterisk/FreePBX | `sip:EXT@HOST:5060` | Self-hosted PBX |
+| Generic SIP | `sip:USER@HOST` | Blank template |

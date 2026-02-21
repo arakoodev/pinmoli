@@ -43,7 +43,7 @@ async function runTest() {
     'a=rtpmap:0 PCMU/8000',
     'a=rtpmap:101 telephone-event/8000',
     'a=sendrecv'
-  ].join('\\r\\n') + '\\r\\n';
+  ].join('\r\n') + '\r\n';
 
   console.log(`Dialing LiveKit via Drachtio SIP Proxy...`);
 
