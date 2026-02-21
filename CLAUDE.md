@@ -25,12 +25,18 @@ docker compose exec frontend node test-sip.mjs        # OPTIONS ping
 docker compose exec frontend node test-rtp.mjs         # RTP media
 docker compose exec frontend node scan-extensions.mjs  # Extension discovery
 
+# CLI engine test (no UI, no SDK — runs sip-engine directly)
+PARAMS=$(echo '{"method":"INVITE","uri":"sip:+1234567890@5eezfwavhxe.sip.livekit.cloud","transport":"auto","headers":{},"codecs":["opus","PCMU"],"audio":{"source":"tone","frequency":440,"duration":5}}' | base64 -w 0)
+docker compose exec frontend node src/lib/sip-engine.mjs "$PARAMS"
+
 # Frontend-only (from frontend/ directory, but prefer Docker)
 npm run dev      # Dev server with Socket.io (node server.js)
 npm run build    # Next.js production build
 npm run lint     # ESLint (includes SIP correctness rules)
 npm test         # Vitest
 ```
+
+**Port 5060 conflict:** Only one process can bind port 5060. If running sip-engine directly while the dev server is up, kill the conflicting process first (`kill $(lsof -ti:5060)` inside the container).
 
 ## Architecture
 
@@ -111,11 +117,12 @@ When writing SIP code in this project, follow these patterns (all enforced by li
 
 ## LiveKit SIP Troubleshooting
 
+- **404 No trunk found**: Phone number in the INVITE URI doesn't match the SIP trunk's allowed numbers. The trunk must be configured to accept calls from the calling number. LiveKit still returns 100 Trying before the 404.
 - **180 Ringing → 503 after 60s**: Multiple possible causes — (1) AI agent worker not running, (2) test framework failing to send ACK after 200 OK, (3) invalid IPs or malformed SDP, (4) Docker container ID in Via header. Check lint output and framework logs first, then agent deployment.
 - **Via header with Docker container ID**: `sip.start()` without `publicAddress` uses `os.hostname()` which returns the Docker container ID (e.g. `6a2d87fd27fc`). Fix: always pass `publicAddress: publicIp`. Lint rule: `sip/require-public-address`.
 - **Docker private IP in Contact/From**: Using `localIp` (e.g. `172.20.0.3`) in Contact/From headers makes them unroutable. Use `publicIp` instead. Lint rule: `sip/no-local-ip-in-sip-uri`.
 - **The 503 is synthetic**: When LiveKit drops the TCP connection after 60s (agent timeout), the `sip` npm library generates a synthetic 503 internally. This is NOT a real SIP 503 from LiveKit.
 - **SDP requires routable IP**: `0.0.0.0` or private Docker IPs in SDP `o=`/`c=` lines cause silent ICE failures. Test scripts fetch public IP via `ifconfig.me`.
-- **Codec requirements**: Always offer opus (PT 111) alongside PCMU (G.711) in SDP.
+- **Codec negotiation**: LiveKit currently selects PCMU/8000 (G.711) even when opus is offered first. Always offer both opus (PT 111) and PCMU (PT 0) in SDP.
 - **SDP line endings**: Must use actual CRLF (`\r\n`), not escaped `\\r\\n`. Lint rule: `sip/no-literal-crlf-escape`.
 - **Custom header safety**: Never `...spread` user headers after critical SIP fields — use `mergeCustomHeaders()` which filters reserved keys. Lint rule: `sip/no-spread-in-sip-headers`.
