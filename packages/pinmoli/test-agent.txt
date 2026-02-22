@@ -1,0 +1,1 @@
+Test the LiveKit SIP endpoint at sip:5eezfwavhxe.sip.livekit.cloud with an OPTIONS request using opus and PCMU codecs
