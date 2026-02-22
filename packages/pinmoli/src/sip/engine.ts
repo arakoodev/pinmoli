@@ -4,6 +4,7 @@
  */
 
 import dgram from 'dgram';
+import { spawn } from 'child_process';
 import { generateCallId, generateTag } from './protocol.js';
 import { buildSdp } from './sdp.js';
 import type { TestConfig, SipEvent } from '../validation/schemas.js';
@@ -143,8 +144,95 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         status: resp.statusCode
       };
 
-      // Parse SDP if present in final response
-      if (resp.statusCode >= 200 && resp.response.includes('Content-Type: application/sdp')) {
+      // Handle 200 OK for INVITE - send ACK and audio
+      if (resp.statusCode === 200 && config.method === 'INVITE') {
+        // Parse SDP answer
+        let remoteIp = host;
+        let remotePort = config.mediaPort;
+        
+        if (resp.response.includes('Content-Type: application/sdp')) {
+          const sdpMatch = resp.response.match(/v=0[\s\S]+/);
+          if (sdpMatch) {
+            yield {
+              type: 'info',
+              timestamp: Date.now(),
+              message: 'SDP answer received',
+              sdpAnswer: sdpMatch[0]
+            };
+
+            // Extract remote IP and port from SDP
+            const cMatch = sdpMatch[0].match(/c=IN IP4 ([\d.]+)/);
+            const mMatch = sdpMatch[0].match(/m=audio (\d+)/);
+            if (cMatch) remoteIp = cMatch[1];
+            if (mMatch) remotePort = parseInt(mMatch[1]);
+          }
+        }
+
+        // Send ACK
+        const ackMessage = buildAckRequest(config.uri, host, port, callId, fromTag, branch);
+        yield {
+          type: 'sip',
+          timestamp: Date.now(),
+          message: 'Sending ACK'
+        };
+
+        await new Promise<void>((resolve) => {
+          socket.send(ackMessage, port, host, () => resolve());
+        });
+
+        // Send audio with ffmpeg
+        yield {
+          type: 'info',
+          timestamp: Date.now(),
+          message: `Streaming audio to ${remoteIp}:${remotePort}`
+        };
+
+        const audioSent = await sendAudio(remoteIp, remotePort);
+        
+        if (audioSent) {
+          yield {
+            type: 'info',
+            timestamp: Date.now(),
+            message: 'Audio stream complete (3s sine tone)'
+          };
+        } else {
+          yield {
+            type: 'info',
+            timestamp: Date.now(),
+            message: 'ffmpeg not available - skipping audio'
+          };
+        }
+
+        // Send BYE to hang up
+        const byeMessage = buildByeRequest(config.uri, host, port, callId, fromTag, branch);
+        yield {
+          type: 'sip',
+          timestamp: Date.now(),
+          message: 'Sending BYE'
+        };
+
+        await new Promise<void>((resolve) => {
+          socket.send(byeMessage, port, host, () => resolve());
+        });
+
+        // Wait for BYE response
+        await new Promise<void>((resolve) => {
+          const timeout = setTimeout(resolve, 1000);
+          socket.once('message', () => {
+            clearTimeout(timeout);
+            resolve();
+          });
+        });
+
+        yield {
+          type: 'sip',
+          timestamp: Date.now(),
+          message: 'Call terminated'
+        };
+      }
+
+      // Parse SDP if present in other responses
+      if (resp.statusCode >= 200 && resp.response.includes('Content-Type: application/sdp') && config.method !== 'INVITE') {
         const sdpMatch = resp.response.match(/v=0[\s\S]+/);
         if (sdpMatch) {
           yield {
@@ -175,6 +263,33 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
       recovery: 'Check network connectivity and SIP server configuration'
     };
   }
+}
+
+/**
+ * Send audio using ffmpeg
+ */
+async function sendAudio(remoteIp: string, remotePort: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const ffmpeg = spawn('ffmpeg', [
+      '-re', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
+      '-acodec', 'pcm_mulaw', '-ar', '8000', '-ac', '1',
+      '-f', 'rtp', `rtp://${remoteIp}:${remotePort}`,
+    ]);
+
+    ffmpeg.on('close', (code) => {
+      resolve(code === 0);
+    });
+
+    ffmpeg.on('error', () => {
+      resolve(false);
+    });
+
+    // Timeout after 5 seconds
+    setTimeout(() => {
+      ffmpeg.kill();
+      resolve(false);
+    }, 5000);
+  });
 }
 
 function buildOptionsRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string): string {
@@ -209,6 +324,38 @@ function buildInviteRequest(uri: string, host: string, port: number, callId: str
     `Content-Length: ${sdp.length}`,
     '',
     sdp
+  ].join('\r\n');
+}
+
+function buildAckRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string): string {
+  return [
+    `ACK ${uri} SIP/2.0`,
+    `Via: SIP/2.0/UDP 0.0.0.0:5060;branch=${branch}`,
+    `From: <sip:pinmoli@pinmoli.local>;tag=${fromTag}`,
+    `To: <${uri}>`,
+    `Call-ID: ${callId}`,
+    `CSeq: 1 ACK`,
+    `Max-Forwards: 70`,
+    `User-Agent: Pinmoli/0.1.0`,
+    `Content-Length: 0`,
+    '',
+    ''
+  ].join('\r\n');
+}
+
+function buildByeRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string): string {
+  return [
+    `BYE ${uri} SIP/2.0`,
+    `Via: SIP/2.0/UDP 0.0.0.0:5060;branch=${branch}`,
+    `From: <sip:pinmoli@pinmoli.local>;tag=${fromTag}`,
+    `To: <${uri}>`,
+    `Call-ID: ${callId}`,
+    `CSeq: 2 BYE`,
+    `Max-Forwards: 70`,
+    `User-Agent: Pinmoli/0.1.0`,
+    `Content-Length: 0`,
+    '',
+    ''
   ].join('\r\n');
 }
 
