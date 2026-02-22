@@ -2,6 +2,8 @@
 
 Complete reference for all 5 Pinmoli tools. Use these for SIP/WebRTC protocol testing.
 
+**Note:** These tools use standard SIP protocol (RFC 3261) and work with any compliant SIP endpoint. No service-specific APIs or credentials required.
+
 ## Tool 1: `sip_test`
 
 Execute SIP protocol tests against endpoints.
@@ -13,7 +15,7 @@ Test SIP endpoints with standard SIP methods (OPTIONS, INVITE, REGISTER) to veri
 
 ```typescript
 {
-  endpoint: string;    // Required: SIP URI (e.g., "sip:example.sip.livekit.cloud")
+  endpoint: string;    // Required: SIP URI (e.g., "sip:endpoint.example.com")
   method: string;      // Required: "OPTIONS" | "INVITE" | "REGISTER"
   timeout?: number;    // Optional: Timeout in ms (default: 5000)
 }
@@ -24,7 +26,7 @@ Test SIP endpoints with standard SIP methods (OPTIONS, INVITE, REGISTER) to veri
 **Health Check (OPTIONS):**
 ```json
 {
-  "endpoint": "sip:5eezfwavhxe.sip.livekit.cloud",
+  "endpoint": "sip:pbx.example.com",
   "method": "OPTIONS"
 }
 ```
@@ -32,7 +34,7 @@ Test SIP endpoints with standard SIP methods (OPTIONS, INVITE, REGISTER) to veri
 **Call Setup Test (INVITE):**
 ```json
 {
-  "endpoint": "sip:5eezfwavhxe.sip.livekit.cloud",
+  "endpoint": "sip:pbx.example.com",
   "method": "INVITE",
   "timeout": 10000
 }
@@ -165,8 +167,8 @@ Store frequently used test configurations with descriptive names for quick acces
 **Save Health Check:**
 ```json
 {
-  "name": "livekit-health-check",
-  "endpoint": "sip:5eezfwavhxe.sip.livekit.cloud",
+  "name": "daily-health-check",
+  "endpoint": "sip:pbx.example.com",
   "method": "OPTIONS"
 }
 ```
@@ -218,7 +220,7 @@ Run saved tests without re-specifying parameters. Useful for regression testing 
 
 ```json
 {
-  "name": "livekit-health-check"
+  "name": "daily-health-check"
 }
 ```
 
@@ -272,8 +274,8 @@ None - this tool takes no parameters.
 {
   "tests": [
     {
-      "name": "livekit-health-check",
-      "endpoint": "sip:5eezfwavhxe.sip.livekit.cloud",
+      "name": "daily-health-check",
+      "endpoint": "sip:pbx.example.com",
       "method": "OPTIONS",
       "timeout": 5000,
       "createdAt": "2026-02-22T10:30:00Z",
@@ -348,14 +350,14 @@ None - this tool takes no parameters.
 The AI agent can understand natural language requests:
 
 **Testing:**
-- "Test sip:example.sip.livekit.cloud with OPTIONS"
+- "Test sip:endpoint.example.com with OPTIONS"
 - "Send an INVITE to sip:pbx.example.com"
-- "Check if sip:test.com is responding"
+- "Check if sip:test.example.com is responding"
 
 **Analysis:**
 - "Why did test 550e8400-e29b-41d4-a716-446655440000 fail?"
 - "Analyze the last failed test"
-- "What went wrong with the LiveKit test?"
+- "What went wrong with the test?"
 
 **Management:**
 - "Save this test as 'daily-health-check'"

@@ -2,6 +2,8 @@
 
 AI-powered SIP/WebRTC testing agent with 5 specialized tools for protocol testing, failure analysis, and test management.
 
+**Purpose:** Generic SIP protocol testing tool that works with ANY standards-compliant SIP endpoint. No service-specific integrations required - uses pure SIP/SDP protocol over UDP/TCP.
+
 ## Quick Start
 
 ```bash
@@ -11,7 +13,7 @@ npm install
 # Build
 npm run build
 
-# Run tests (35 tests, includes LiveKit integration)
+# Run tests (35 tests, includes any SIP service integration)
 npm test
 
 # Run the agent directly
@@ -20,15 +22,12 @@ node dist/index.js
 
 ## Configuration
 
-Create `.env` file with your SIP endpoint credentials:
+No configuration required. Pinmoli works with any standard SIP endpoint.
 
-```bash
-# LiveKit SIP endpoint example
-LIVEKIT_ENDPOINT=sip:your-endpoint.sip.livekit.cloud
-LIVEKIT_URL=wss://your-instance.livekit.cloud
-LIVEKIT_API_KEY=your-api-key
-LIVEKIT_API_SECRET=your-api-secret
-```
+Simply provide the SIP URI when testing:
+- `sip:endpoint.example.com`
+- `sip:user@domain.com`
+- `sips:secure.example.com` (SIP over TLS)
 
 ## Available Tools
 
@@ -36,14 +35,14 @@ LIVEKIT_API_SECRET=your-api-secret
 Tests SIP endpoints with OPTIONS, INVITE, or REGISTER methods.
 
 **Parameters:**
-- `endpoint` (string, required): SIP URI (e.g., `sip:example.sip.livekit.cloud`)
+- `endpoint` (string, required): SIP URI (e.g., `sip:endpoint.example.com`)
 - `method` (string, required): SIP method - `OPTIONS`, `INVITE`, or `REGISTER`
 - `timeout` (number, optional): Timeout in milliseconds (default: 5000)
 
 **Example:**
 ```javascript
 {
-  "endpoint": "sip:5eezfwavhxe.sip.livekit.cloud",
+  "endpoint": "sip:pbx.example.com",
   "method": "OPTIONS",
   "timeout": 5000
 }
@@ -80,11 +79,11 @@ Lists all saved test configurations with their details.
 Several test scripts are provided for direct testing:
 
 ```bash
-# Test LiveKit SIP endpoint (OPTIONS)
-node test-livekit.js
+# Test a SIP endpoint with OPTIONS
+node test-sip-options.js
 
-# Test LiveKit with INVITE
-node test-livekit-full.js
+# Test with INVITE
+node test-sip-invite.js
 
 # Test agent with natural language
 node test-agent.js
@@ -170,7 +169,7 @@ npm run lint
 
 **Test Coverage:**
 - Unit tests: Protocol, SDP, storage, validation
-- Integration tests: LiveKit Cloud, SIP handler, end-to-end
+- Integration tests: Real SIP endpoints, protocol handlers, end-to-end flows
 
 ## Domain Restrictions
 
@@ -200,12 +199,14 @@ The transport layer includes automatic socket cleanup. If tests hang, check for:
 - Network connectivity issues
 - Invalid SIP endpoint
 
-### LiveKit Integration
-For LiveKit testing:
-1. Get credentials from LiveKit Cloud dashboard
-2. Add to `.env` file
-3. Use the provided test scripts
-4. Check `test/integration/livekit.test.ts` for examples
+### Troubleshooting
+
+For any SIP service testing:
+1. Verify the SIP URI format is correct
+2. Check network connectivity to the endpoint
+3. Ensure UDP port 5060 is not blocked by firewall
+4. Review test results and error messages
+5. Use `analyze_failure` tool for detailed diagnostics
 
 ## License
 
