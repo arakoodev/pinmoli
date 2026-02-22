@@ -110,10 +110,14 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           // Emit response immediately for yielding
           socket.emit('response', { statusCode, statusText, duration, response });
 
-          // Close on final response (2xx, 3xx, 4xx, 5xx, 6xx)
-          if (statusCode >= 200) {
+          // Close on final response (2xx, 3xx, 4xx, 5xx, 6xx) - but NOT for INVITE
+          if (statusCode >= 200 && config.method !== 'INVITE') {
             clearTimeout(timeoutId);
             socket.close();
+            resolve();
+          } else if (statusCode >= 200 && config.method === 'INVITE') {
+            // For INVITE, keep socket open for ACK/BYE
+            clearTimeout(timeoutId);
             resolve();
           }
           // Keep waiting for provisional responses (1xx)
@@ -136,6 +140,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
     });
 
     // Yield all responses
+    let inviteHandled = false;
     for (const resp of responses) {
       yield {
         type: 'sip',
@@ -144,8 +149,9 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         status: resp.statusCode
       };
 
-      // Handle 200 OK for INVITE - send ACK and audio
-      if (resp.statusCode === 200 && config.method === 'INVITE') {
+      // Handle 200 OK for INVITE - send ACK and audio (only once)
+      if (resp.statusCode === 200 && config.method === 'INVITE' && !inviteHandled) {
+        inviteHandled = true;
         // Parse SDP answer
         let remoteIp = host;
         let remotePort = config.mediaPort;
@@ -223,6 +229,8 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
             resolve();
           });
         });
+
+        socket.close();
 
         yield {
           type: 'sip',
