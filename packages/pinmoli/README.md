@@ -6,6 +6,26 @@ AI-powered SIP/WebRTC testing agent with 5 specialized tools for protocol testin
 
 ## Quick Start
 
+### Docker (Recommended)
+
+```bash
+# Build and run
+docker-compose up
+
+# Run tests
+docker-compose run pinmoli npm test
+
+# Run live tests with audio streaming
+docker-compose run pinmoli npm test -- test/live/
+
+# Run demo
+docker-compose run pinmoli npx tsx demo/sip-streaming.ts
+```
+
+See [DOCKER.md](./DOCKER.md) for detailed Docker usage.
+
+### Local Development
+
 ```bash
 # Install dependencies
 npm install
@@ -13,12 +33,20 @@ npm install
 # Build
 npm run build
 
-# Run tests (35 tests, includes any SIP service integration)
+# Run tests
 npm test
 
-# Run the agent directly
-node dist/index.js
+# Note: Audio streaming requires ffmpeg installed locally
 ```
+
+## Features
+
+- ✅ Complete SIP call flow (INVITE → ACK → RTP → BYE)
+- ✅ Audio streaming (3s 440Hz sine tone via ffmpeg)
+- ✅ Real-time event streaming to TUI
+- ✅ 87 tests (unit + integration + live)
+- ✅ Docker support with ffmpeg included
+- ✅ Works with any SIP endpoint
 
 ## Configuration
 
