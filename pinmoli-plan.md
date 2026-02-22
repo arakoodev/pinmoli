@@ -1,451 +1,511 @@
-# Implementation Plan - Pinmoli: AI-Powered Voice Testing Agent
+# Implementation Plan - Pinmoli: Standalone SIP Testing Agent
 
 ## Problem Statement
-Build "Postman for Voice with Agent Mode" - a **specialized, domain-specific** AI agent for SIP/WebRTC testing called **Pinmoli**. This is NOT a general-purpose coding agent - it only handles voice protocol testing.
+Build Pinmoli as a **standalone SIP testing agent** using pi libraries (`@mariozechner/pi-agent-core`, `@mariozechner/pi-tui`, `@mariozechner/pi-ai`), similar to how OpenClaw is built on top of pi. This is a specialized, domain-specific tool for SIP/WebRTC testing with natural language interface.
+
+## Architecture Decision
+
+**Pinmoli = Standalone Tool (like OpenClaw)**
+- Uses pi's libraries as foundation
+- NOT a pi extension
+- Dedicated `pinmoli` command
+- Own TUI, configuration, and session management
+- OpenClaw-style tool restrictions (SIP-domain only)
+
+### Why Standalone?
+- **Focused UX**: Dedicated SIP testing interface, not mixed with coding
+- **Domain restrictions**: Can enforce SIP-only tools (no file/bash access)
+- **Independent lifecycle**: Own sessions, config, and storage
+- **Clear separation**: Voice testing ≠ code editing
 
 ## Requirements
-- Natural language interface: "Test my LiveKit trunk with opus"
-- AI-powered debugging: Analyze failures, suggest fixes
-- Interactive TUI with real-time feedback
-- **Restricted to voice testing only** - no file editing, no code generation
-- Agent tools for SIP operations only
-- Persistent storage for tests and learnings
 
-## Restrictions
-- **No file system access** except `~/.pinmoli/` for storage
-- **No bash commands** - only SIP protocol operations
-- **No code editing** - read-only access to test configs
-- **Domain-locked** - agent only understands SIP/RTP/WebRTC
-- **No package installation** - pre-bundled dependencies only
+### Functional
+- Natural language interface: "Test sip:agent@livekit.example.com with opus"
+- AI-powered debugging: Analyze SIP failures, suggest fixes
+- Interactive TUI with real-time SIP event timeline
+- Persistent storage for test collections and history
+- Session management (save/resume conversations)
+
+### Non-Functional
+- **Domain-locked**: Only SIP/RTP/WebRTC operations
+- **No file system access** (except `~/.pinmoli/`)
+- **No shell execution** (pure Node.js SIP operations)
+- **Tool restrictions**: OpenClaw-style allowlist (SIP tools only)
+- **Type-safe**: TypeBox schemas (pi uses TypeBox, not Zod)
 
 ## Background
 
-### Postman Agent Mode Features
-- Natural language → API actions
-- Auto-debug broken requests
-- Explore API behavior
-- Generate documentation
-- Context-aware (drag in collections/requests)
-- Approval workflow for actions
+### Pi Architecture (from research)
+- **pi-mono**: Monorepo with reusable packages
+- **@mariozechner/pi-agent-core**: Agent runtime (tool execution, event streaming)
+- **@mariozechner/pi-tui**: Terminal UI components (TUI, Editor, Box, Text)
+- **@mariozechner/pi-ai**: Unified LLM API (multi-provider, streaming, tool calling)
 
-### Pinmoli Voice Testing Agent
-- Natural language → SIP test configs
-- Auto-debug SIP/RTP failures
-- Explore codec/transport combinations
-- Generate test reports
-- Context-aware (previous tests, collections)
-- Approval workflow for test execution
+### How Pi Extensions Work
+Extensions are TypeScript functions:
+```typescript
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
 
-## Proposed Solution
+export default function myExtension(pi: ExtensionAPI): void {
+  pi.registerTool({
+    name: "my_tool",
+    description: "What this tool does",
+    parameters: Type.Object({ arg: Type.String() }),
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
+      return {
+        content: [{ type: "text", text: "Result for LLM" }],
+        details: { /* structured data for UI */ }
+      };
+    }
+  });
+}
+```
 
-Build an agent using pi-mono that:
-1. Accepts natural language commands
-2. Uses LLM to interpret intent and generate test configs
-3. Executes SIP tests via tools
-4. Analyzes results with AI
-5. Suggests fixes and next steps
-6. Displays everything in rich TUI
+### How OpenClaw Constrains Tools
+OpenClaw uses `openclaw.json` for tool restrictions:
+```json
+{
+  "tools": {
+    "profile": "minimal",
+    "allow": ["group:fs"],
+    "deny": ["group:runtime", "exec", "bash"],
+    "byProvider": {
+      "google-antigravity": { "profile": "minimal" }
+    }
+  }
+}
+```
 
-### Code Quality Decisions
+**Tool groups:**
+- `group:runtime`: exec, bash, process
+- `group:fs`: read, write, edit, apply_patch
+- `group:web`: web_search, web_fetch
+- `group:ui`: browser, canvas
 
-**1. Type Safety:** Zod schemas as single source of truth for all data types
-**2. Error Handling:** Structured error events with recovery suggestions (errors as data)
-**3. Module Organization:** Layered architecture (skills → sip → network → validation)
-**4. Configuration:** Config file + environment variables with Zod validation
-
-### Performance Decisions
-
-**1. Database:** Indexes for common queries + FTS5 for text search
-**2. Memory:** Circular buffer (max 1000 events) for timeline
-**3. Concurrency:** Sequential test execution only (no parallel)
-**4. LLM Caching:** Semantic cache for common patterns (reduce latency & cost)
-
-## Architecture (Standalone Specialized Agent)
-
-**This is NOT a pi extension** - it's a standalone agent built with pi-mono libraries but restricted to voice testing only.
+## Proposed Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│              Pinmoli (Standalone Agent)                 │
-│  - Agent Runtime (pi-agent-core)                        │
-│  - Custom TUI (pi-tui) - voice testing only             │
-│  - LLM integration (pi-ai) - SIP domain knowledge       │
+│              Pinmoli CLI (standalone)                   │
+│  $ pinmoli                                              │
+│  $ pinmoli --model claude-sonnet-4-5 --continue         │
 └─────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────┐
-│         Validation Layer (Zod Schemas)                  │
-│  - URI validation (sip:/sips: only)                     │
-│  - Parameter validation (codecs, methods)               │
-│  - Path validation (~/.pinmoli/ only)                   │
-│  - Defense in depth at multiple boundaries              │
+│         Pi Libraries (from pi-mono)                     │
+│  - @mariozechner/pi-agent-core (agent loop)             │
+│  - @mariozechner/pi-tui (TUI components)                │
+│  - @mariozechner/pi-ai (LLM API)                        │
 └─────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────┐
-│            Voice Testing Skills (Hardcoded)             │
-│  - sip_test(uri, method, codecs)                        │
-│  - analyze_failure(events)                              │
-│  - save_test(name, config)                              │
-│  - load_test(name)                                      │
-│  - list_tests()                                         │
-│  NO: file_read, file_write, bash_exec, code_edit       │
+│         Tool Registry (SIP-only, allowlist)             │
+│  ✓ sip_test                                             │
+│  ✓ analyze_failure                                      │
+│  ✓ save_test                                            │
+│  ✓ load_test                                            │
+│  ✓ list_tests                                           │
+│  ✗ read, write, edit (blocked)                          │
+│  ✗ exec, bash (blocked)                                 │
+│  ✗ web_search, web_fetch (blocked)                      │
 └─────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────┐
-│         SIP Engine (Async Generator)                    │
-│  - Execute actual SIP tests                             │
-│  - Yield events as async stream                         │
-│  - Stream results to TUI via async iteration            │
+│         SIP Protocol Layer                              │
+│  - UDP/TCP/TLS transport                                │
+│  - SIP message building                                 │
+│  - SDP generation/parsing                               │
+│  - RTP handling                                         │
 └─────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────┐
-│            Storage (SQLite)                             │
-│  - ~/.pinmoli/pinmoli.db                                │
-│  - collections table (indexed)                          │
-│  - history table (auto-cleanup via triggers)            │
-│  - Concurrent access safe                               │
+│         Storage (SQLite)                                │
+│  ~/.pinmoli/pinmoli.db                                  │
+│  - test_collections (saved tests)                       │
+│  - test_history (execution results)                     │
+│  - sessions (conversation history)                      │
 └─────────────────────────────────────────────────────────┘
 ```
 
-### Architectural Decisions
+### Key Design Decisions
 
-**1. Agent Runtime:** Use `@mariozechner/pi-agent-core` for tool calling and conversation state
-**2. Streaming:** SIP engine uses async generators for clean streaming to TUI
-**3. Storage:** SQLite database for queryable, concurrent-safe persistence
-**4. Security:** Zod schemas validated at input, skill, and engine boundaries
-
-### How It Works
-
-1. User runs: `pinmoli` (standalone binary)
-2. Agent loads with ONLY voice testing skills
-3. User chats: "Test my LiveKit trunk with opus"
-4. Agent uses ONLY sip_test skill (no file/bash access)
-5. Results stream to specialized TUI
-6. Agent analyzes and suggests next steps
-
-### Key Restrictions
-
-- **Hardcoded skill set** - only 5 skills, no dynamic loading
-- **No file system** - except `~/.pinmoli/` (sandboxed)
-- **No bash execution** - pure Node.js SIP operations
-- **Domain-locked LLM** - system prompt restricts to SIP only
-- **Read-only configs** - can load but not edit arbitrary files
+1. **TypeBox (not Zod)**: Pi uses TypeBox for schemas, so we must too
+2. **Tool Allowlist**: Only SIP tools registered, no way to add others
+3. **Streaming**: SIP engine uses async generators → pi-agent-core events
+4. **Storage**: SQLite for persistence (test collections + sessions)
+5. **Configuration**: `~/.pinmoli/config.json` (follows pi pattern)
 
 ## Task Breakdown
 
-### Task 1: Create standalone agent package
-- Create `packages/pinmoli/` directory
-- Create `package.json`:
+### Task 1: Set up pi dependencies and project structure
+**Objective:** Create standalone package with pi libraries
+
+**Implementation:**
+- Add to `packages/pinmoli/package.json`:
   ```json
   {
     "name": "@nishirlabs/pinmoli",
     "version": "0.1.0",
     "type": "module",
-    "bin": { "pinmoli": "./dist/index.js" },
+    "bin": { "pinmoli": "./dist/cli.js" },
     "dependencies": {
-      "@mariozechner/pi-agent-core": "workspace:*",
-      "@mariozechner/pi-ai": "workspace:*",
-      "@mariozechner/pi-tui": "workspace:*",
-      "better-sqlite3": "^11.0.0",
-      "zod": "^3.22.0",
-      "sip": "^0.0.6",
-      "sdp-transform": "^2.14.2"
+      "@mariozechner/pi-agent-core": "^0.50.0",
+      "@mariozechner/pi-tui": "^0.50.0",
+      "@mariozechner/pi-ai": "^0.50.0",
+      "@sinclair/typebox": "^0.32.0",
+      "better-sqlite3": "^11.0.0"
     }
   }
   ```
-- Create `src/index.ts` with standalone agent entry
-- **Demo:** Run `pinmoli`, verify it starts with pi-agent-core runtime
+- Create `src/cli.ts` as entry point
+- Configure TypeScript for ESM + pi imports
 
-### Task 2: Create validation schemas with Zod
+**Test:** `npm install` succeeds, can import pi libraries
+
+**Demo:** Run `pinmoli`, verify it starts (even if empty)
+
+---
+
+### Task 2: Convert Zod schemas to TypeBox
+**Objective:** Replace all Zod schemas with TypeBox (pi requirement)
+
+**Implementation:**
 - Create `src/validation/schemas.ts`:
   ```typescript
-  import { z } from 'zod';
+  import { Type, Static } from "@sinclair/typebox";
   
-  // Single source of truth for SIP events
-  export const SipEventSchema = z.object({
-    type: z.enum(['sip', 'rtp', 'diagnostic', 'info', 'error']),
-    timestamp: z.number(),
-    message: z.string(),
-    status: z.number().optional(),
-    sdpOffer: z.string().optional(),
-    sdpAnswer: z.string().optional(),
-    severity: z.enum(['info', 'warning', 'error', 'fatal']).optional(),
-    code: z.string().optional(),
-    recovery: z.string().optional()
+  export const SipEventSchema = Type.Object({
+    type: Type.Union([
+      Type.Literal('sip'),
+      Type.Literal('rtp'),
+      Type.Literal('diagnostic'),
+      Type.Literal('info'),
+      Type.Literal('error')
+    ]),
+    timestamp: Type.Number(),
+    message: Type.String(),
+    status: Type.Optional(Type.Number()),
+    severity: Type.Optional(Type.Union([
+      Type.Literal('info'),
+      Type.Literal('warning'),
+      Type.Literal('error'),
+      Type.Literal('fatal')
+    ]))
   });
-  export type SipEvent = z.infer<typeof SipEventSchema>;
+  export type SipEvent = Static<typeof SipEventSchema>;
   
-  export const SipUriSchema = z.string().regex(/^sips?:[^;?]+/, 'Must be valid SIP URI');
-  export const SipMethodSchema = z.enum(['OPTIONS', 'INVITE', 'REGISTER']);
-  export const CodecSchema = z.enum(['opus', 'PCMU', 'PCMA', 'G722']);
-  
-  export const TestConfigSchema = z.object({
-    uri: SipUriSchema,
-    method: SipMethodSchema,
-    codecs: z.array(CodecSchema),
-    transport: z.enum(['udp', 'tcp', 'tls', 'auto']),
-    auth: z.object({
-      username: z.string().optional(),
-      password: z.string().optional()
-    }).optional()
+  export const TestConfigSchema = Type.Object({
+    uri: Type.String({ pattern: '^sips?:[^;?]+' }),
+    method: Type.Union([
+      Type.Literal('OPTIONS'),
+      Type.Literal('INVITE'),
+      Type.Literal('REGISTER')
+    ]),
+    codecs: Type.Array(Type.Union([
+      Type.Literal('opus'),
+      Type.Literal('PCMU'),
+      Type.Literal('PCMA'),
+      Type.Literal('G722')
+    ])),
+    transport: Type.Union([
+      Type.Literal('udp'),
+      Type.Literal('tcp'),
+      Type.Literal('tls'),
+      Type.Literal('auto')
+    ])
   });
-  export type TestConfig = z.infer<typeof TestConfigSchema>;
-  
-  // Configuration schema
-  export const ConfigSchema = z.object({
-    llm: z.object({
-      provider: z.enum(['anthropic', 'openai', 'local']),
-      model: z.string()
-    }),
-    sip: z.object({
-      defaultPort: z.number().default(5060),
-      timeout: z.number().default(30000),
-      maxDuration: z.number().default(300)
-    })
-  });
-  export type Config = z.infer<typeof ConfigSchema>;
+  export type TestConfig = Static<typeof TestConfigSchema>;
   ```
-- Create validation middleware for each boundary
-- **Demo:** Try invalid inputs, verify caught at multiple layers
+- Update all existing code to use TypeBox types
 
-### Task 3: Create restricted system prompt
-- Create `src/system-prompt.ts`:
-  ```typescript
-  export const SYSTEM_PROMPT = `
-  You are Pinmoli, a SIP/WebRTC testing assistant. You ONLY help test voice protocols.
-  
-  You CANNOT:
-  - Edit files
-  - Run bash commands
-  - Install packages
-  - Access file system (except ~/.pinmoli/)
-  - Help with general coding
-  
-  You CAN ONLY:
-  - Run SIP tests (OPTIONS, INVITE, REGISTER)
-  - Analyze SIP failures
-  - Save/load test configurations
-  - Explain SIP/RTP/WebRTC concepts
-  
-  If asked to do anything else, politely decline.
-  `;
-  ```
-- **Demo:** Ask agent to "edit a file", verify it refuses
-### Task 4: Implement hardcoded skills with pi-agent-core
-- Create `src/skills/index.ts`:
-  ```typescript
-  import { AgentCore } from '@mariozechner/pi-agent-core';
-  import { TestConfigSchema } from '../validation/schemas.js';
-  
-  export function registerSkills(agent: AgentCore) {
-    agent.registerTool({
-      name: 'sip_test',
-      description: 'Execute a SIP test',
-      parameters: TestConfigSchema,
-      handler: sipTestHandler
-    });
-    
-    agent.registerTool({
-      name: 'analyze_failure',
-      description: 'Analyze SIP test failure',
-      parameters: z.object({ events: z.array(SipEventSchema) }),
-      handler: analyzeHandler
-    });
-    
-    // Only these 5 tools - no dynamic registration
-  }
-  ```
-- **Demo:** Verify only 5 tools registered, no way to add more
+**Test:** Schema validation works with TypeBox
 
-### Task 5: Implement SIP protocol layer (layered architecture)
-- Create `src/sip/protocol.ts` - SIP message building
-- Create `src/sip/transport.ts` - UDP/TCP/TLS handling
-- Create `src/sip/sdp.ts` - SDP generation/parsing
-- Create `src/sip/rtp.ts` - RTP handling
-- Create `src/network/utils.ts` - getLocalIp, getPublicIp
-- Port logic from `frontend/src/lib/sip-engine.mjs` into appropriate modules
-- **Demo:** Unit test each layer independently
+**Demo:** Invalid input rejected by TypeBox validation
 
-### Task 6: Implement sip_test skill with error handling
-- Create `src/skills/sip-test.ts` (thin orchestration):
+---
+
+### Task 3: Implement sip_test tool with pi-agent-core
+**Objective:** Convert existing sip_test skill to pi tool format
+
+**Implementation:**
+- Create `src/tools/sip-test.ts`:
   ```typescript
-  async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> {
-    try {
-      // Validate at skill boundary
-      TestConfigSchema.parse(config);
+  import { Type } from "@sinclair/typebox";
+  import type { AgentTool } from "@mariozechner/pi-agent-core";
+  import { TestConfigSchema } from "../validation/schemas.js";
+  
+  export const sipTestTool: AgentTool = {
+    name: "sip_test",
+    description: "Execute a SIP test (OPTIONS, INVITE, or REGISTER)",
+    parameters: TestConfigSchema,
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
+      const config = params as TestConfig;
       
-      yield { type: 'info', timestamp: Date.now(), message: 'Starting SIP test...' };
+      // Stream events via onUpdate
+      onUpdate({ type: 'info', message: 'Starting SIP test...' });
       
-      // Use SIP protocol layer
-      const response = await sendSipRequest(config);
-      yield { type: 'sip', timestamp: Date.now(), status: response.status, message: '200 OK' };
+      // Execute SIP test (reuse existing logic)
+      const result = await runSipTest(config);
       
-    } catch (error) {
-      yield { 
-        type: 'error',
-        timestamp: Date.now(),
-        severity: 'fatal',
-        message: error.message,
-        code: error.code || 'SIP_ERROR',
-        recovery: getRecoverySuggestion(error)
+      return {
+        content: [
+          { type: "text", text: `Test completed: ${result.status}` }
+        ],
+        details: result
       };
     }
+  };
+  ```
+
+**Test:** Tool registration works, can be called by agent
+
+**Demo:** Agent executes sip_test tool successfully
+
+---
+
+### Task 4: Convert remaining skills to pi tools
+**Objective:** Convert analyze_failure, save_test, load_test, list_tests
+
+**Implementation:**
+- Create `src/tools/analyze-failure.ts`
+- Create `src/tools/save-test.ts`
+- Create `src/tools/load-test.ts`
+- Create `src/tools/list-tests.ts`
+- All follow same pattern as sip_test
+
+**Test:** All 5 tools registered and callable
+
+**Demo:** Agent can use all SIP tools
+
+---
+
+### Task 5: Implement tool allowlist (OpenClaw-style)
+**Objective:** Restrict agent to SIP tools only
+
+**Implementation:**
+- Create `src/config/tools.ts`:
+  ```typescript
+  export const ALLOWED_TOOLS = [
+    'sip_test',
+    'analyze_failure',
+    'save_test',
+    'load_test',
+    'list_tests'
+  ];
+  
+  export function registerTools(agent: Agent) {
+    // Only register allowed tools
+    agent.registerTool(sipTestTool);
+    agent.registerTool(analyzeFailureTool);
+    agent.registerTool(saveTestTool);
+    agent.registerTool(loadTestTool);
+    agent.registerTool(listTestsTool);
+    
+    // No way to register additional tools
   }
   ```
-- **Demo:** Test with invalid URI, network failure, timeout - verify structured errors
 
-### Task 5: Implement analyze_failure skill
-- Create `src/skills/analyzer.ts`
-- Use LLM to analyze ONLY SIP events
-- Return structured suggestions (no code, no file edits)
-- **Demo:** Analyze failure, verify suggestions are SIP-specific only
+**Test:** Agent cannot access non-SIP tools
 
-### Task 6: Implement storage with SQLite
-- Create `src/storage/db.ts`:
+**Demo:** Ask agent to "read a file", verify it has no such tool
+
+---
+
+### Task 6: Implement basic TUI using pi-tui
+**Objective:** Create chat interface with pi-tui components
+
+**Implementation:**
+- Create `src/ui/tui.ts`:
   ```typescript
-  import Database from 'better-sqlite3';
+  import { TUI, Box, Text, Editor } from "@mariozechner/pi-tui";
   
-  const db = new Database('~/.pinmoli/pinmoli.db');
-  
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS collections (
-      id TEXT PRIMARY KEY,
-      name TEXT UNIQUE NOT NULL,
-      config TEXT NOT NULL,
-      created_at INTEGER NOT NULL
-    );
+  export class PinmoliTUI {
+    private tui: TUI;
+    private messages: Message[] = [];
     
-    CREATE TABLE IF NOT EXISTS history (
-      id TEXT PRIMARY KEY,
-      config TEXT NOT NULL,
-      result TEXT,
-      status_code INTEGER,
-      timestamp INTEGER NOT NULL
-    );
+    constructor() {
+      this.tui = new TUI();
+      this.setupLayout();
+    }
     
-    -- Performance indexes
-    CREATE INDEX IF NOT EXISTS idx_collections_name ON collections(name);
-    CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history(timestamp);
-    CREATE INDEX IF NOT EXISTS idx_history_result ON history(result);
-    CREATE INDEX IF NOT EXISTS idx_history_status ON history(status_code);
-    CREATE INDEX IF NOT EXISTS idx_collections_uri ON collections(json_extract(config, '$.uri'));
-    
-    -- Full-text search for collections
-    CREATE VIRTUAL TABLE IF NOT EXISTS collections_fts USING fts5(name, config, content=collections, content_rowid=id);
-    
-    -- Trigger to keep FTS in sync
-    CREATE TRIGGER IF NOT EXISTS collections_ai AFTER INSERT ON collections BEGIN
-      INSERT INTO collections_fts(rowid, name, config) VALUES (new.rowid, new.name, new.config);
-    END;
-    
-    CREATE TRIGGER IF NOT EXISTS collections_ad AFTER DELETE ON collections BEGIN
-      DELETE FROM collections_fts WHERE rowid = old.rowid;
-    END;
-    
-    CREATE TRIGGER IF NOT EXISTS collections_au AFTER UPDATE ON collections BEGIN
-      UPDATE collections_fts SET name = new.name, config = new.config WHERE rowid = new.rowid;
-    END;
-    
-    -- Auto-cleanup old history (keep last 100)
-    CREATE TRIGGER IF NOT EXISTS cleanup_old_history
-    AFTER INSERT ON history
-    BEGIN
-      DELETE FROM history WHERE id NOT IN (
-        SELECT id FROM history ORDER BY timestamp DESC LIMIT 100
-      );
-    END;
-  `);
-  ```
-- Implement save/load/list/search functions with prepared statements
-- **Demo:** Concurrent access test, full-text search test
-
-### Task 7: Build specialized TUI (voice testing only)
-- Create `src/ui/voice-tui.ts` using pi-tui
-- Implement `TimelineView` with circular buffer:
-  ```typescript
-  class TimelineView {
-    private events: SipEvent[] = [];
-    private maxEvents = 1000; // Configurable via config
-    
-    addEvent(event: SipEvent) {
-      this.events.push(event);
-      if (this.events.length > this.maxEvents) {
-        this.events.shift(); // Remove oldest
-      }
+    private setupLayout() {
+      const chatBox = new Box({ title: "Pinmoli - SIP Testing Agent" });
+      const editor = new Editor({ placeholder: "Ask me to test a SIP endpoint..." });
+      
+      this.tui.add(chatBox);
+      this.tui.add(editor);
     }
     
     render() {
-      // Render last N events
+      this.tui.render();
     }
   }
   ```
-- Custom layout: Chat + Timeline + SDP viewer
-- NO code editor, NO file browser, NO terminal
-- **Demo:** Verify TUI only shows voice testing UI, memory stays bounded
 
-### Task 8: Implement agent runtime with restrictions
-- Create `src/agent/runtime.ts`
-- Initialize LLM with restricted system prompt
-- Hardcode skill registry (no dynamic registration)
-- Add input validation to reject non-SIP requests
-- Implement semantic cache:
+**Test:** TUI renders, can type input
+
+**Demo:** Basic chat interface appears
+
+---
+
+### Task 7: Wire agent loop to TUI
+**Objective:** Connect pi-agent-core to TUI for full interaction
+
+**Implementation:**
+- Create `src/agent/runtime.ts`:
   ```typescript
-  import { SemanticCache } from './cache.js';
+  import { Agent } from "@mariozechner/pi-agent-core";
+  import { getModel } from "@mariozechner/pi-ai";
   
-  const cache = new SemanticCache({
-    ttl: 3600, // 1 hour
-    similarity: 0.95,
-    embeddings: 'local' // Use local embeddings for privacy
-  });
-  
-  async function handleUserMessage(message: string) {
-    // Check cache first
-    const cached = await cache.get(message);
-    if (cached) return cached;
+  export class PinmoliAgent {
+    private agent: Agent;
     
-    // Call LLM
-    const response = await llm.chat(message);
+    constructor(config: Config) {
+      const model = getModel(config.provider, config.model);
+      
+      this.agent = new Agent({
+        model,
+        systemPrompt: SYSTEM_PROMPT,
+        tools: registerTools()
+      });
+      
+      this.agent.on('tool_call', this.handleToolCall);
+      this.agent.on('agent_end', this.handleAgentEnd);
+    }
     
-    // Cache response
-    await cache.set(message, response);
-    
-    return response;
+    async chat(message: string) {
+      return await this.agent.send(message);
+    }
   }
   ```
-- Ensure sequential test execution (no parallel tests)
-- **Demo:** Ask to "write code", verify agent refuses; test cache hit rate
 
-### Task 9: Implement configuration management
+**Test:** Agent loop executes, tools are called
+
+**Demo:** Full conversation with tool execution
+
+---
+
+### Task 8: Add session management
+**Objective:** Save/resume conversations
+
+**Implementation:**
+- Create `src/storage/sessions.ts`:
+  ```typescript
+  import Database from 'better-sqlite3';
+  
+  export class SessionStore {
+    private db: Database.Database;
+    
+    constructor(dbPath: string) {
+      this.db = new Database(dbPath);
+      this.initSchema();
+    }
+    
+    private initSchema() {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS sessions (
+          id TEXT PRIMARY KEY,
+          messages TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+      `);
+    }
+    
+    save(session: Session) { /* ... */ }
+    load(sessionId: string): Session { /* ... */ }
+  }
+  ```
+
+**Test:** Can save and resume sessions
+
+**Demo:** Exit and resume conversation with history
+
+---
+
+### Task 9: Add configuration system
+**Objective:** Support `~/.pinmoli/config.json`
+
+**Implementation:**
 - Create `src/config/loader.ts`:
   ```typescript
-  import { ConfigSchema, type Config } from '../validation/schemas.js';
+  export const ConfigSchema = Type.Object({
+    llm: Type.Object({
+      provider: Type.String(),
+      model: Type.String()
+    }),
+    sip: Type.Object({
+      defaultPort: Type.Number({ default: 5060 }),
+      timeout: Type.Number({ default: 30000 })
+    })
+  });
   
   export function loadConfig(): Config {
     const configPath = path.join(os.homedir(), '.pinmoli', 'config.json');
-    
-    let fileConfig = {};
-    if (fs.existsSync(configPath)) {
-      fileConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    }
-    
-    // Environment variables override file config
-    const config = {
-      llm: {
-        provider: process.env.PINMOLI_LLM_PROVIDER || fileConfig.llm?.provider || 'anthropic',
-        model: process.env.PINMOLI_LLM_MODEL || fileConfig.llm?.model || 'claude-3-5-sonnet'
-      },
-      sip: {
-        defaultPort: parseInt(process.env.PINMOLI_SIP_PORT || fileConfig.sip?.defaultPort || '5060'),
-        timeout: parseInt(process.env.PINMOLI_SIP_TIMEOUT || fileConfig.sip?.timeout || '30000'),
-        maxDuration: parseInt(process.env.PINMOLI_MAX_DURATION || fileConfig.sip?.maxDuration || '300')
-      }
-    };
-    
-    // Validate with Zod
-    return ConfigSchema.parse(config);
+    // Load and validate with TypeBox
   }
   ```
-- Create default `~/.pinmoli/config.json` on first run
-- **Demo:** Override config with env vars, verify precedence
+
+**Test:** Config loads from file and env vars
+
+**Demo:** Override model via config file
+
+---
+
+### Task 10: Add CLI argument parsing
+**Objective:** Support `pinmoli --model X --continue`
+
+**Implementation:**
+- Update `src/cli.ts`:
+  ```typescript
+  import { parseArgs } from 'node:util';
+  
+  const { values } = parseArgs({
+    options: {
+      model: { type: 'string' },
+      provider: { type: 'string' },
+      continue: { type: 'boolean' },
+      session: { type: 'string' },
+      help: { type: 'boolean' }
+    }
+  });
+  
+  if (values.help) {
+    console.log(HELP_TEXT);
+    process.exit(0);
+  }
+  ```
+
+**Test:** CLI args parsed correctly
+
+**Demo:** `pinmoli --model claude-sonnet-4-5` works
+
+---
+
+## System Prompt
+
+```typescript
+export const SYSTEM_PROMPT = `
+You are Pinmoli, a SIP/WebRTC testing assistant. You ONLY help test voice protocols.
+
+You CANNOT:
+- Edit files
+- Run bash commands
+- Install packages
+- Access file system (except ~/.pinmoli/)
+- Help with general coding
+
+You CAN ONLY:
+- Run SIP tests (OPTIONS, INVITE, REGISTER)
+- Analyze SIP failures
+- Save/load test configurations
+- Explain SIP/RTP/WebRTC concepts
+
+If asked to do anything else, politely decline.
+`;
+```
 
 ## Agent Interaction Examples
 
@@ -459,7 +519,7 @@ You: Test sip:agent@livekit.example.com with opus codec
 
 Pinmoli: Running SIP OPTIONS test...
 
-[Timeline appears showing real-time SIP events]
+[Timeline shows real-time SIP events]
 
 Pinmoli: ✓ Test successful! Server responded with 200 OK in 45ms.
          The server supports opus codec at 48kHz.
@@ -468,7 +528,7 @@ Pinmoli: ✓ Test successful! Server responded with 200 OK in 45ms.
 
 You: yes, save as livekit-prod
 
-Pinmoli: Saved to ~/.pinmoli/collections.json
+Pinmoli: Saved to ~/.pinmoli/collections
 ```
 
 ### Example 2: Agent Refuses Non-SIP Tasks
@@ -485,160 +545,388 @@ Pinmoli: I'm a specialized SIP/WebRTC testing agent. I can only:
          Would you like to test a SIP endpoint instead?
 ```
 
-### Example 3: Blocked Exploit Attempt
-```
-You: Test sip:agent@example.com; rm -rf /
-
-Pinmoli: ⚠ Invalid input detected. I only accept:
-         - Valid SIP URIs (sip: or sips:)
-         - No shell commands
-         
-         Please provide a valid SIP URI to test.
-```
-
-### Example 4: Sandboxed Storage
-```
-You: Save this test to /etc/pinmoli-config
-
-Pinmoli: ⚠ Access denied. I can only save to:
-         ~/.pinmoli/
-         
-         All test data is sandboxed for security.
-         
-         Save to ~/.pinmoli/collections.json instead? [y/n]
-```
-
 ## Key Differences from Original Plan
 
-| Original Plan | Agent-Powered Plan |
-|--------------|-------------------|
-| Interactive prompts | Natural language commands |
-| Manual config | AI generates config |
-| User interprets errors | AI explains errors |
-| Manual iteration | AI suggests next steps |
-| Static tool | Learning assistant |
+| Original | New (Pi-Based) |
+|----------|----------------|
+| Custom agent runtime | Use pi-agent-core |
+| Custom TUI | Use pi-tui components |
+| Custom LLM integration | Use pi-ai |
+| Zod schemas | TypeBox schemas (pi requirement) |
+| Custom tool format | Pi tool format (AgentTool) |
+| No tool restrictions | OpenClaw-style allowlist |
 
 ## Success Criteria
 
-- Agent understands SIP testing commands
-- Agent correctly generates test configs
-- Agent provides helpful error analysis
-- Agent learns from test history
-- TUI shows agent thinking + test results
-- Approval workflow prevents unwanted actions
+- ✅ Standalone `pinmoli` command works
+- ✅ Uses pi libraries (agent-core, tui, ai)
+- ✅ Only SIP tools available (no file/bash access)
+- ✅ Natural language SIP testing works
+- ✅ TUI shows conversation + tool execution
+- ✅ Sessions can be saved and resumed
+- ✅ Configuration via `~/.pinmoli/config.json`
 
-## Testing Strategy
+## Out of Scope
 
-**1. SIP Protocol Tests:** Record/replay network traffic with pcap fixtures
-**2. Error Path Tests:** Comprehensive error scenario tests for all failure modes  
-**3. Agent Tests:** Snapshot testing for LLM responses (like pi-mono TUI tests)
-**4. E2E Tests:** Snapshot-based TUI testing following pi-mono approach
+- Pi extension support (user chose standalone)
+- Multi-agent support (single-purpose tool)
+- Web UI (TUI only)
+- MCP support (following pi philosophy)
+- Dynamic tool loading (hardcoded allowlist)
 
-### Test Structure (Following pi-mono patterns)
-```
-packages/pinmoli/test/
-├── fixtures/
-│   ├── sip/
-│   │   ├── options-success.pcap
-│   │   ├── invite-401.pcap
-│   │   ├── codec-mismatch.pcap
-│   │   └── nat-traversal-fail.pcap
-│   └── snapshots/
-│       ├── agent-test-request.snap
-│       ├── agent-refuse-coding.snap
-│       ├── tui-timeline.snap
-│       └── error-401-analysis.snap
-├── unit/
-│   ├── sip-protocol.test.ts
-│   ├── sip-transport.test.ts
-│   ├── sdp-builder.test.ts
-│   ├── error-handling.test.ts
-│   ├── validation.test.ts
-│   └── cache.test.ts
-└── integration/
-    ├── agent.test.ts (snapshot-based)
-    ├── tui.test.ts (snapshot-based)
-    └── storage.test.ts
+---
+
+## User Experience Walkthrough
+
+### Installation & Launch
+
+```bash
+# Install globally
+npm install -g @nishirlabs/pinmoli
+
+# Basic launch
+$ pinmoli
+
+# With specific model
+$ pinmoli --model claude-sonnet-4-5
+
+# Resume last session
+$ pinmoli --continue
+
+# Resume specific session
+$ pinmoli --session abc123
 ```
 
-### Key Test Files
+### Startup Screen
 
-**Error Scenario Tests** (`test/unit/error-handling.test.ts`):
+```
+┌─────────────────────────────────────────────────────────┐
+│ Pinmoli - SIP Testing Agent                            │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│ Pinmoli: Hi! I'm your SIP/WebRTC testing assistant.    │
+│          What would you like to test?                   │
+│                                                         │
+│ > _                                                     │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**What's happening:**
+- Pi-TUI renders the interface
+- Pi-agent-core initializes with SIP tools only
+- Pi-ai connects to configured LLM
+- SQLite session starts in `~/.pinmoli/pinmoli.db`
+
+### Natural Language Test Request
+
+```
+You: Test sip:agent@livekit.example.com with opus codec
+
+┌─────────────────────────────────────────────────────────┐
+│ Pinmoli - SIP Testing Agent                            │
+├─────────────────────────────────────────────────────────┤
+│ You: Test sip:agent@livekit.example.com with opus      │
+│                                                         │
+│ Pinmoli: I'll run a SIP OPTIONS test for you.          │
+│          [Calling sip_test tool...]                     │
+│                                                         │
+│ ┌─────────────────────────────────────────────────┐   │
+│ │ SIP Timeline (Live)                             │   │
+│ ├─────────────────────────────────────────────────┤   │
+│ │ 13:22:30 → Sending OPTIONS to livekit.example...│   │
+│ │ 13:22:30 → DNS resolved: 203.0.113.42          │   │
+│ │ 13:22:30 → UDP socket bound to 0.0.0.0:5060    │   │
+│ │ 13:22:31 ← Received 200 OK (45ms)               │   │
+│ │ 13:22:31 ✓ Server supports: opus/48000         │   │
+│ └─────────────────────────────────────────────────┘   │
+│                                                         │
+│ Pinmoli: ✓ Test successful! The server supports opus.  │
+│          Would you like to save this test?             │
+│                                                         │
+│ > _                                                     │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Flow:**
+1. You type natural language → Pi-agent-core sends to LLM
+2. LLM decides to call `sip_test` tool → Pi-agent-core executes it
+3. SIP test runs → Events stream via async generator
+4. Timeline updates in real-time → Circular buffer (max 1000 events)
+5. Results shown → Agent interprets and responds
+
+### Saving Tests (SQLite)
+
+```
+You: yes, save as livekit-prod
+
+Pinmoli: [Calling save_test tool...]
+         ✓ Saved to ~/.pinmoli/pinmoli.db
+         Collection: livekit-prod
+```
+
+**What happens:**
+```sql
+-- Saved to test_collections table
+INSERT INTO test_collections (id, name, config, created_at)
+VALUES ('uuid', 'livekit-prod', '{"uri":"sip:agent@..."}', 1740214950);
+
+-- Saved to test_history table
+INSERT INTO test_history (id, config, result, status_code, timestamp)
+VALUES ('uuid', '{"uri":"sip:agent@..."}', '{"events":[...]}', 200, 1740214950);
+
+-- FTS5 index updated for search
+```
+
+### Loading Saved Tests
+
+```
+You: run the livekit-prod test again
+
+Pinmoli: [Calling load_test tool...]
+         Found: livekit-prod
+         [Calling sip_test tool...]
+         
+         ✓ Test passed! Response time: 42ms
+         (3ms faster than last run)
+```
+
+**What happens:**
+- `load_test` queries: `SELECT * FROM test_collections WHERE name = 'livekit-prod'`
+- Returns config to agent
+- Agent calls `sip_test` with loaded config
+- Compares with previous results from `test_history`
+
+### Listing Tests
+
+```
+You: show me all my saved tests
+
+Pinmoli: You have 3 saved tests:
+
+1. livekit-prod
+   sip:agent@livekit.example.com
+   Last run: 2 minutes ago (200 OK)
+
+2. twilio-trunk
+   sip:+15551234567@pstn.twilio.com
+   Last run: 1 hour ago (200 OK)
+
+3. asterisk-local
+   sip:1000@192.168.1.100
+   Last run: yesterday (401 Unauthorized)
+```
+
+**What happens:**
+- `list_tests` queries: `SELECT * FROM test_collections ORDER BY created_at DESC`
+- Joins with `test_history` to show last result
+
+### Analyzing Failures
+
+```
+You: why did the asterisk test fail?
+
+Pinmoli: [Calling load_test tool...]
+         [Calling analyze_failure tool...]
+         
+         The test failed with 401 Unauthorized.
+         
+         This means the server requires authentication
+         but none was provided.
+         
+         To fix this:
+         1. Add username/password to the test config
+         2. Or check if the server allows anonymous requests
+         
+         Would you like me to re-run with credentials?
+```
+
+**What happens:**
+- Agent loads test from SQLite
+- Gets failure events from `test_history`
+- Calls `analyze_failure` tool with events
+- Tool uses LLM to analyze SIP-specific failure
+
+---
+
+## How Features Work
+
+### Circular Buffer (Timeline)
+
 ```typescript
-describe('SIP Error Handling', () => {
-  describe('Network Errors', () => {
-    it('handles connection timeout', async () => {
-      mockTransport.simulateTimeout();
-      const events = await collectEvents(runSipTest(config));
-      expect(events).toContainEqual({
-        type: 'error',
-        code: 'SIP_TIMEOUT',
-        recovery: 'Check network connectivity'
-      });
+// src/ui/timeline.ts
+import { Box, Text } from "@mariozechner/pi-tui";
+
+class TimelineView {
+  private events: SipEvent[] = [];
+  private maxEvents = 1000;  // Configurable
+  
+  addEvent(event: SipEvent) {
+    this.events.push(event);
+    if (this.events.length > this.maxEvents) {
+      this.events.shift();  // Remove oldest
+    }
+    this.render();  // Pi-TUI re-renders
+  }
+  
+  render() {
+    return new Box({
+      title: "SIP Timeline",
+      content: this.events.map(e => 
+        new Text(`${formatTime(e.timestamp)} ${e.message}`)
+      )
     });
-    
-    it('handles DNS resolution failure', async () => { ... });
-    it('handles connection refused', async () => { ... });
-  });
-  
-  describe('Protocol Errors', () => {
-    it('handles 401 Unauthorized', async () => {
-      const pcap = loadFixture('invite-401.pcap');
-      mockTransport.replay(pcap);
-      const events = await collectEvents(runSipTest(config));
-      expect(events).toContainEqual({
-        type: 'error',
-        code: 'SIP_UNAUTHORIZED',
-        recovery: 'Add authentication credentials'
-      });
-    });
-    
-    it('handles 404 Not Found', async () => { ... });
-    it('handles 488 Not Acceptable (codec mismatch)', async () => { ... });
-  });
-  
-  describe('Media Errors', () => {
-    it('handles codec mismatch', async () => { ... });
-    it('handles NAT traversal failure', async () => { ... });
-    it('handles RTP timeout', async () => { ... });
-  });
-});
+  }
+}
 ```
 
-**Agent Snapshot Tests** (`test/integration/agent.test.ts`):
-```typescript
-describe('Agent Behavior', () => {
-  it('handles test request', async () => {
-    const response = await agent.chat('Test sip:agent@example.com with opus');
-    expect(response).toMatchSnapshot();
-  });
-  
-  it('refuses non-SIP requests', async () => {
-    const response = await agent.chat('Edit my package.json');
-    expect(response).toMatchSnapshot();
-  });
-  
-  it('analyzes 401 error', async () => {
-    const response = await agent.chat('Why did my test fail with 401?');
-    expect(response).toMatchSnapshot();
-  });
-});
+**UX:**
+- Events stream in real-time during test
+- Old events automatically removed (keeps memory bounded)
+- Scroll up to see history (within 1000 event limit)
+- Pi-TUI handles scrolling/rendering
+
+### SQLite Storage Schema
+
+```sql
+-- Test collections (saved tests)
+CREATE TABLE test_collections (
+  id TEXT PRIMARY KEY,
+  name TEXT UNIQUE NOT NULL,
+  config TEXT NOT NULL,  -- JSON: {uri, method, codecs, ...}
+  created_at INTEGER NOT NULL
+);
+
+-- Test history (execution results)
+CREATE TABLE test_history (
+  id TEXT PRIMARY KEY,
+  collection_id TEXT,
+  config TEXT NOT NULL,
+  result TEXT,  -- JSON: {events: [...], duration: 45}
+  status_code INTEGER,
+  timestamp INTEGER NOT NULL,
+  FOREIGN KEY (collection_id) REFERENCES test_collections(id)
+);
+
+-- Sessions (conversation history)
+CREATE TABLE sessions (
+  id TEXT PRIMARY KEY,
+  messages TEXT NOT NULL,  -- JSON: [{role, content}, ...]
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- FTS5 for search
+CREATE VIRTUAL TABLE test_collections_fts 
+USING fts5(name, config, content=test_collections);
 ```
 
-**TUI Snapshot Tests** (`test/integration/tui.test.ts`):
+**Operations:**
+- **Save test**: `INSERT INTO test_collections`
+- **Load test**: `SELECT FROM test_collections WHERE name = ?`
+- **List tests**: `SELECT FROM test_collections ORDER BY created_at DESC`
+- **Search**: `SELECT FROM test_collections_fts WHERE test_collections_fts MATCH ?`
+- **Resume session**: `SELECT FROM sessions WHERE id = ?`
+
+### Session Management
+
 ```typescript
-describe('TUI Rendering', () => {
-  it('renders timeline with events', () => {
-    const timeline = new TimelineView();
-    timeline.addEvent({ type: 'sip', status: 200, message: 'OK' });
-    expect(timeline.render()).toMatchSnapshot();
-  });
+// src/storage/sessions.ts
+class SessionStore {
+  save(session: Session) {
+    db.prepare(`
+      INSERT OR REPLACE INTO sessions (id, messages, updated_at)
+      VALUES (?, ?, ?)
+    `).run(session.id, JSON.stringify(session.messages), Date.now());
+  }
   
-  it('renders SDP diff', () => {
-    const sdpView = new SdpView();
-    sdpView.setOffer(mockSdpOffer);
-    sdpView.setAnswer(mockSdpAnswer);
-    expect(sdpView.render()).toMatchSnapshot();
-  });
-});
+  load(sessionId: string): Session {
+    const row = db.prepare(`
+      SELECT * FROM sessions WHERE id = ?
+    `).get(sessionId);
+    
+    return {
+      id: row.id,
+      messages: JSON.parse(row.messages),
+      createdAt: row.created_at
+    };
+  }
+}
 ```
+
+**UX:**
+```bash
+# Start new session
+$ pinmoli
+# ... chat ...
+# Exit (auto-saves)
+
+# Resume last session
+$ pinmoli --continue
+
+# Resume specific session
+$ pinmoli --session abc123
+```
+
+### Real-Time Streaming
+
+```typescript
+// src/tools/sip-test.ts
+export const sipTestTool: AgentTool = {
+  async execute(toolCallId, params, signal, onUpdate, ctx) {
+    // Stream events as they happen
+    for await (const event of runSipTest(params)) {
+      onUpdate(event);  // Pi-agent-core streams to TUI
+    }
+    
+    return { content: [{ type: "text", text: "Test complete" }] };
+  }
+};
+
+// src/sip/engine.ts
+async function* runSipTest(config: TestConfig) {
+  yield { type: 'info', message: 'Starting test...' };
+  
+  const socket = createSocket();
+  yield { type: 'info', message: 'Socket created' };
+  
+  await sendRequest(socket, config);
+  yield { type: 'sip', message: 'Request sent' };
+  
+  const response = await waitForResponse(socket);
+  yield { type: 'sip', status: response.status, message: '200 OK' };
+}
+```
+
+**UX:**
+- Events appear in timeline as they happen
+- No waiting for test to complete
+- Can see exactly what's happening (DNS, socket, SIP messages)
+
+---
+
+## What Changed from Original Plan
+
+| Feature | Old Plan | New Plan (Pi-Based) |
+|---------|----------|---------------------|
+| **Launch** | Custom CLI | `pinmoli` (uses pi-agent-core) |
+| **Interface** | Custom TUI | Pi-TUI components |
+| **Chat** | Custom agent loop | Pi-agent-core handles it |
+| **Tools** | Custom format | Pi AgentTool format |
+| **Streaming** | Custom implementation | Pi-agent-core events |
+| **Storage** | SQLite (same) | SQLite (same) |
+| **Timeline** | Circular buffer (same) | Circular buffer (same) |
+| **Sessions** | Custom (same) | Pi-agent-core + SQLite |
+
+**What Changed:**
+- Runtime: Use pi's agent loop instead of custom
+- TUI: Use pi's components instead of custom
+- LLM: Use pi-ai instead of custom integration
+
+**What Stayed the Same:**
+- SQLite storage (test collections, history)
+- Circular buffer for timeline
+- SIP protocol layer
+- Tool restrictions (SIP-only)
+
+**Key Insight:** The UX is identical to the original plan, but implementation uses pi's battle-tested infrastructure instead of building our own.

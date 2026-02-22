@@ -1,24 +1,25 @@
 {
   "name": "@nishirlabs/pinmoli",
   "version": "0.1.0",
-  "description": "AI-powered SIP/WebRTC testing agent - pi plugin",
+  "description": "Standalone SIP/WebRTC testing agent built with pi libraries",
   "type": "module",
   "bin": {
-    "pinmoli": "./dist/index.js"
+    "pinmoli": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
+    "dev": "tsc --watch",
     "test": "vitest run",
+    "test:watch": "vitest",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix"
   },
   "dependencies": {
     "@mariozechner/pi-agent-core": "^0.54.0",
+    "@mariozechner/pi-tui": "^0.54.0",
     "@mariozechner/pi-ai": "^0.54.0",
     "@sinclair/typebox": "^0.34.0",
-    "zod": "^3.22.0",
-    "better-sqlite3": "^11.0.0",
-    "sip": "^0.0.6"
+    "better-sqlite3": "^11.0.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",

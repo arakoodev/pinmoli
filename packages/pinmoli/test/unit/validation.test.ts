@@ -1,22 +1,23 @@
 import { describe, it, expect } from 'vitest';
+import { Value } from '@sinclair/typebox/value';
 import { TestConfigSchema, SipEventSchema, SipUriSchema } from '../../src/validation/schemas.js';
 
 describe('Validation Schemas', () => {
   describe('SipUriSchema', () => {
     it('accepts valid sip URI', () => {
-      expect(() => SipUriSchema.parse('sip:agent@example.com')).not.toThrow();
+      expect(Value.Check(SipUriSchema, 'sip:agent@example.com')).toBe(true);
     });
 
     it('accepts valid sips URI', () => {
-      expect(() => SipUriSchema.parse('sips:agent@example.com')).not.toThrow();
+      expect(Value.Check(SipUriSchema, 'sips:agent@example.com')).toBe(true);
     });
 
     it('rejects invalid URI', () => {
-      expect(() => SipUriSchema.parse('http://example.com')).toThrow();
+      expect(Value.Check(SipUriSchema, 'http://example.com')).toBe(false);
     });
 
     it('rejects file:// URI', () => {
-      expect(() => SipUriSchema.parse('file:///etc/passwd')).toThrow();
+      expect(Value.Check(SipUriSchema, 'file:///etc/passwd')).toBe(false);
     });
   });
 
@@ -26,9 +27,11 @@ describe('Validation Schemas', () => {
         uri: 'sip:agent@example.com',
         method: 'OPTIONS' as const,
         codecs: ['opus', 'PCMU'],
-        transport: 'auto' as const
+        transport: 'auto' as const,
+        mediaPort: 10000,
+        timeout: 5000
       };
-      expect(() => TestConfigSchema.parse(config)).not.toThrow();
+      expect(Value.Check(TestConfigSchema, config)).toBe(true);
     });
 
     it('requires at least one codec', () => {
@@ -36,9 +39,11 @@ describe('Validation Schemas', () => {
         uri: 'sip:agent@example.com',
         method: 'OPTIONS' as const,
         codecs: [],
-        transport: 'auto' as const
+        transport: 'auto' as const,
+        mediaPort: 10000,
+        timeout: 5000
       };
-      expect(() => TestConfigSchema.parse(config)).toThrow();
+      expect(Value.Check(TestConfigSchema, config)).toBe(false);
     });
 
     it('rejects invalid method', () => {
@@ -46,9 +51,11 @@ describe('Validation Schemas', () => {
         uri: 'sip:agent@example.com',
         method: 'GET',
         codecs: ['opus'],
-        transport: 'auto'
+        transport: 'auto',
+        mediaPort: 10000,
+        timeout: 5000
       };
-      expect(() => TestConfigSchema.parse(config)).toThrow();
+      expect(Value.Check(TestConfigSchema, config)).toBe(false);
     });
   });
 
@@ -59,7 +66,7 @@ describe('Validation Schemas', () => {
         timestamp: Date.now(),
         message: 'Test message'
       };
-      expect(() => SipEventSchema.parse(event)).not.toThrow();
+      expect(Value.Check(SipEventSchema, event)).toBe(true);
     });
 
     it('validates error event with recovery', () => {
@@ -71,7 +78,7 @@ describe('Validation Schemas', () => {
         code: 'SIP_TIMEOUT',
         recovery: 'Check network'
       };
-      expect(() => SipEventSchema.parse(event)).not.toThrow();
+      expect(Value.Check(SipEventSchema, event)).toBe(true);
     });
   });
 });

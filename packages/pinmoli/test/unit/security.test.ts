@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { Value } from '@sinclair/typebox/value';
 import { SipUriSchema } from '../../src/validation/schemas.js';
 
 describe('Security - SIP URI Validation', () => {
@@ -13,7 +14,7 @@ describe('Security - SIP URI Validation', () => {
     ];
 
     invalid.forEach(uri => {
-      expect(() => SipUriSchema.parse(uri)).toThrow();
+      expect(Value.Check(SipUriSchema, uri)).toBe(false);
     });
   });
 
@@ -27,7 +28,7 @@ describe('Security - SIP URI Validation', () => {
     ];
 
     injections.forEach(uri => {
-      expect(() => SipUriSchema.parse(uri)).toThrow();
+      expect(Value.Check(SipUriSchema, uri)).toBe(false);
     });
   });
 
@@ -41,7 +42,7 @@ describe('Security - SIP URI Validation', () => {
     ];
 
     valid.forEach(uri => {
-      expect(() => SipUriSchema.parse(uri)).not.toThrow();
+      expect(Value.Check(SipUriSchema, uri)).toBe(true);
     });
   });
 });
