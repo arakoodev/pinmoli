@@ -219,6 +219,24 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           };
         }
 
+        // Wait for agent response (listen for incoming audio)
+        yield {
+          type: 'info',
+          timestamp: Date.now(),
+          message: 'Waiting for agent response...'
+        };
+
+        // Wait 10 seconds to receive agent's response
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 10000);
+        });
+
+        yield {
+          type: 'info',
+          timestamp: Date.now(),
+          message: 'Agent response window complete'
+        };
+
         // Send BYE to hang up
         const byeMessage = buildByeRequest(config.uri, host, port, callId, fromTag, branch);
         yield {
