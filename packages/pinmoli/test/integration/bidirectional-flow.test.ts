@@ -101,7 +101,7 @@ describe('Bidirectional Agent Conversation', () => {
     tui.streamMessage('\n  [SIP] Sending ACK');
     tui.streamMessage('\n  [INFO] Streaming audio (weather-question)');
     tui.streamMessage('\n  [INFO] Audio stream complete');
-    tui.streamMessage('\n  [INFO] Waiting for agent response...');
+    tui.streamMessage('\n  [INFO] Waiting for agent response (10s)...');
     tui.streamMessage('\n  [INFO] Agent response window complete');
     tui.streamMessage('\n  [SIP] Sending BYE');
     tui.streamMessage('\n[Tool] Complete\n');
@@ -112,5 +112,40 @@ describe('Bidirectional Agent Conversation', () => {
     expect(fullOutput).toContain('weather-question');
     expect(fullOutput).toContain('Waiting for agent response');
     expect(fullOutput).toContain('agent had time to respond');
+  });
+
+  it('allows custom response wait time', () => {
+    tui.start();
+    
+    tui.addMessage('user', 'Test the agent but wait 20 seconds for response');
+    tui.addMessage('assistant', 'I\'ll set responseWaitTime to 20 seconds');
+    
+    tui.streamMessage('\n[Tool] Executing sip_test...');
+    tui.streamMessage('\n  [SIP] Received 200 OK');
+    tui.streamMessage('\n  [SIP] Sending ACK');
+    tui.streamMessage('\n  [INFO] Streaming audio');
+    tui.streamMessage('\n  [INFO] Audio stream complete');
+    tui.streamMessage('\n  [INFO] Waiting for agent response (20s)...');
+    tui.streamMessage('\n  [INFO] Agent response window complete');
+    tui.streamMessage('\n  [SIP] Sending BYE');
+    tui.streamMessage('\n[Tool] Complete\n');
+
+    const fullOutput = output.join('');
+    expect(fullOutput).toContain('20 seconds');
+    expect(fullOutput).toContain('(20s)');
+  });
+
+  it('allows short response wait time', () => {
+    tui.start();
+    
+    tui.addMessage('user', 'Quick test with 3 second wait');
+    
+    tui.streamMessage('\n[Tool] Executing sip_test...');
+    tui.streamMessage('\n  [INFO] Waiting for agent response (3s)...');
+    tui.streamMessage('\n  [INFO] Agent response window complete');
+    tui.streamMessage('\n[Tool] Complete\n');
+
+    const fullOutput = output.join('');
+    expect(fullOutput).toContain('(3s)');
   });
 });

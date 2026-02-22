@@ -72,6 +72,12 @@ export const TestConfigSchema = Type.Object({
   mediaPort: Type.Number({ minimum: 1024, maximum: 65535, default: 10000 }),
   timeout: Type.Number({ minimum: 1000, default: 5000 }),
   audioSample: Type.Optional(AudioSampleSchema),
+  responseWaitTime: Type.Optional(Type.Number({ 
+    minimum: 0, 
+    maximum: 60,
+    default: 10,
+    description: 'Seconds to wait for agent response after sending audio' 
+  })),
   auth: Type.Optional(Type.Object({
     username: Type.Optional(Type.String()),
     password: Type.Optional(Type.String())

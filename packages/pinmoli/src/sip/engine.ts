@@ -220,15 +220,16 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         }
 
         // Wait for agent response (listen for incoming audio)
+        const waitTime = config.responseWaitTime ?? 10;
         yield {
           type: 'info',
           timestamp: Date.now(),
-          message: 'Waiting for agent response...'
+          message: `Waiting for agent response (${waitTime}s)...`
         };
 
-        // Wait 10 seconds to receive agent's response
+        // Wait for agent's response
         await new Promise<void>((resolve) => {
-          setTimeout(resolve, 10000);
+          setTimeout(resolve, waitTime * 1000);
         });
 
         yield {

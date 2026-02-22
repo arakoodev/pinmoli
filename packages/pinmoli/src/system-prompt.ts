@@ -26,6 +26,12 @@ AUDIO SAMPLES:
 - All samples are PCMU @ 8kHz mono (SIP compatible)
 - Default for INVITE tests: voice-hello (actual speech, not tones)
 
+AGENT RESPONSE:
+- After sending audio, we wait for the agent to respond
+- Default wait time: 10 seconds (configurable with responseWaitTime parameter)
+- User can specify: "wait 20 seconds for response" or "use 5 second timeout"
+- This allows bidirectional conversation with voice agents
+
 IMPORTANT RESTRICTIONS:
 - Only accept SIP URIs (sip: or sips: schemes)
 - Only work with voice testing protocols
