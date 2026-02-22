@@ -7,12 +7,12 @@
 import { runSipTest } from '../src/sip/engine.js';
 
 const config = {
-  uri: 'sip:test@sip.example.com',
-  method: 'OPTIONS',
+  uri: 'sip:+1234567890@5eezfwavhxe.sip.livekit.cloud',
+  method: 'INVITE',
   codecs: ['opus', 'PCMU'],
   transport: 'udp',
   mediaPort: 10000,
-  timeout: 2000
+  timeout: 15000
 };
 
 console.log('Testing SIP engine with streaming events...\n');

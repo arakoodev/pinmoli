@@ -83,30 +83,39 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
 
     // Send request
     const startTime = Date.now();
+    const responses: Array<{ statusCode: number; statusText: string; response: string }> = [];
     
     await new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         socket.close();
-        reject(new Error('Request timeout'));
+        if (responses.length === 0) {
+          reject(new Error('Request timeout'));
+        } else {
+          resolve();
+        }
       }, config.timeout);
 
       socket.on('message', (msg) => {
-        clearTimeout(timeoutId);
         const response = msg.toString();
         const statusMatch = response.match(/SIP\/2\.0 (\d+) (.+)/);
         
         if (statusMatch) {
           const statusCode = parseInt(statusMatch[1]);
-          const statusText = statusMatch[2];
+          const statusText = statusMatch[2].trim();
           const duration = Date.now() - startTime;
 
-          socket.close();
-          resolve();
+          responses.push({ statusCode, statusText, response });
 
-          // This will be yielded after the promise resolves
-          setTimeout(() => {
-            socket.emit('response', { statusCode, statusText, duration, response });
-          }, 0);
+          // Emit response immediately for yielding
+          socket.emit('response', { statusCode, statusText, duration, response });
+
+          // Close on final response (2xx, 3xx, 4xx, 5xx, 6xx)
+          if (statusCode >= 200) {
+            clearTimeout(timeoutId);
+            socket.close();
+            resolve();
+          }
+          // Keep waiting for provisional responses (1xx)
         }
       });
 
@@ -123,41 +132,32 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           reject(err);
         }
       });
-
-      // Capture response for yielding
-      socket.once('response', (data: any) => {
-        setTimeout(() => {
-          socket.emit('yield-response', data);
-        }, 0);
-      });
     });
 
-    // Wait for response event
-    const responseData: any = await new Promise((resolve) => {
-      socket.once('yield-response', resolve);
-    });
+    // Yield all responses
+    for (const resp of responses) {
+      yield {
+        type: 'sip',
+        timestamp: Date.now(),
+        message: `Received ${resp.statusCode} ${resp.statusText}`,
+        status: resp.statusCode
+      };
 
-    const duration = Date.now() - startTime;
-
-    yield {
-      type: 'sip',
-      timestamp: Date.now(),
-      message: `Received ${responseData.statusCode} ${responseData.statusText} (${duration}ms)`,
-      status: responseData.statusCode
-    };
-
-    // Parse SDP if present
-    if (responseData.response.includes('Content-Type: application/sdp')) {
-      const sdpMatch = responseData.response.match(/v=0[\s\S]+/);
-      if (sdpMatch) {
-        yield {
-          type: 'info',
-          timestamp: Date.now(),
-          message: 'SDP answer received',
-          sdpAnswer: sdpMatch[0]
-        };
+      // Parse SDP if present in final response
+      if (resp.statusCode >= 200 && resp.response.includes('Content-Type: application/sdp')) {
+        const sdpMatch = resp.response.match(/v=0[\s\S]+/);
+        if (sdpMatch) {
+          yield {
+            type: 'info',
+            timestamp: Date.now(),
+            message: 'SDP answer received',
+            sdpAnswer: sdpMatch[0]
+          };
+        }
       }
     }
+
+    const duration = Date.now() - startTime;
 
     yield {
       type: 'info',
