@@ -1,8 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { TestConfig } from '../../src/validation/schemas.js';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
 
 // Note: These tests use the real database at ~/.pinmoli/
 // Each test should use unique collection names to avoid conflicts

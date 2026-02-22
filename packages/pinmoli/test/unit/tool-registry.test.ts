@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { Type } from '@sinclair/typebox';
-import { registerTool, getTools, isToolAllowed, ALLOWED_TOOLS } from '../../src/tools/registry.js';
+import { registerTool, isToolAllowed, ALLOWED_TOOLS } from '../../src/tools/registry.js';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 
 describe('Tool Registry', () => {
