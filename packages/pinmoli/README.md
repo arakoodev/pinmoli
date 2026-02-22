@@ -1,77 +1,211 @@
-# Pinmoli - SIP/WebRTC Testing Plugin for Pi
+# Pinmoli - SIP/WebRTC Testing Tool
 
-Minimal pi plugin providing 5 SIP/WebRTC testing tools.
+AI-powered SIP/WebRTC testing agent with 5 specialized tools for protocol testing, failure analysis, and test management.
 
-## What It Is
-
-Just 5 tools for pi-agent-core:
-1. `sip_test` - Execute SIP tests
-2. `analyze_failure` - Analyze failures  
-3. `save_test` - Save configurations
-4. `load_test` - Load configurations
-5. `list_tests` - List all tests
-
-## Installation
+## Quick Start
 
 ```bash
-cd packages/pinmoli
+# Install dependencies
 npm install
+
+# Build
 npm run build
+
+# Run tests (35 tests, includes LiveKit integration)
+npm test
+
+# Run the agent directly
+node dist/index.js
 ```
 
-## Usage
+## Configuration
 
-The pi framework handles everything. Just use the tools:
+Create `.env` file with your SIP endpoint credentials:
 
+```bash
+# LiveKit SIP endpoint example
+LIVEKIT_ENDPOINT=sip:your-endpoint.sip.livekit.cloud
+LIVEKIT_URL=wss://your-instance.livekit.cloud
+LIVEKIT_API_KEY=your-api-key
+LIVEKIT_API_SECRET=your-api-secret
 ```
-> test sip:5eezfwavhxe.sip.livekit.cloud with OPTIONS
-> save this test as "health-check"
-> list my saved tests
+
+## Available Tools
+
+### 1. `sip_test` - Execute SIP Protocol Tests
+Tests SIP endpoints with OPTIONS, INVITE, or REGISTER methods.
+
+**Parameters:**
+- `endpoint` (string, required): SIP URI (e.g., `sip:example.sip.livekit.cloud`)
+- `method` (string, required): SIP method - `OPTIONS`, `INVITE`, or `REGISTER`
+- `timeout` (number, optional): Timeout in milliseconds (default: 5000)
+
+**Example:**
+```javascript
+{
+  "endpoint": "sip:5eezfwavhxe.sip.livekit.cloud",
+  "method": "OPTIONS",
+  "timeout": 5000
+}
+```
+
+### 2. `analyze_failure` - Analyze Test Failures
+Analyzes failed SIP tests and provides diagnostic insights.
+
+**Parameters:**
+- `testId` (string, required): ID of the failed test to analyze
+
+### 3. `save_test` - Save Test Configuration
+Saves a test configuration for later reuse.
+
+**Parameters:**
+- `name` (string, required): Unique name for the test
+- `endpoint` (string, required): SIP URI
+- `method` (string, required): SIP method
+- `timeout` (number, optional): Timeout in milliseconds
+
+### 4. `load_test` - Load Saved Test
+Loads and executes a previously saved test configuration.
+
+**Parameters:**
+- `name` (string, required): Name of the saved test
+
+### 5. `list_tests` - List All Saved Tests
+Lists all saved test configurations with their details.
+
+**Parameters:** None
+
+## Test Scripts
+
+Several test scripts are provided for direct testing:
+
+```bash
+# Test LiveKit SIP endpoint (OPTIONS)
+node test-livekit.js
+
+# Test LiveKit with INVITE
+node test-livekit-full.js
+
+# Test agent with natural language
+node test-agent.js
+
+# Test tool directly (no agent)
+node test-tool-direct.js
 ```
 
 ## Architecture
 
 ```
-Pi Framework (handles TUI, agent, interaction)
-  ↓
-Pinmoli Tools (5 hardcoded skills)
-  ↓
-SIP Transport (UDP)
-  ↓
-Storage (SQLite)
+┌─────────────────────────────────────┐
+│   AI Agent (Claude/GPT)             │
+│   - Natural language interface      │
+│   - Tool orchestration              │
+└──────────────┬──────────────────────┘
+               │
+┌──────────────▼──────────────────────┐
+│   5 Specialized Tools                │
+│   - sip_test                         │
+│   - analyze_failure                  │
+│   - save_test / load_test / list     │
+└──────────────┬──────────────────────┘
+               │
+┌──────────────▼──────────────────────┐
+│   SIP Protocol Layer                 │
+│   - UDP transport (dgram)            │
+│   - SIP message builder              │
+│   - SDP builder                      │
+└──────────────┬──────────────────────┘
+               │
+┌──────────────▼──────────────────────┐
+│   Storage Layer                      │
+│   - SQLite with FTS5                 │
+│   - Test configurations              │
+│   - Test results & history           │
+└──────────────────────────────────────┘
 ```
 
-## What We DON'T Do
-
-- ❌ Custom TUI (pi handles it)
-- ❌ Custom agent runtime (pi-agent-core handles it)
-- ❌ Custom config management (pi handles it)
-- ❌ Custom UI components (pi-tui handles it)
-
-## What We DO
-
-- ✅ 5 SIP testing tools
-- ✅ SIP protocol implementation
-- ✅ SQLite storage for tests
-- ✅ Zod validation
-
-## Files
+## Project Structure
 
 ```
-src/
-├── index.ts              # Minimal entry point
-├── agent/runtime.ts      # Agent creation (uses pi-agent-core)
-├── skills/               # 5 tools
-├── sip/                  # SIP protocol
-├── storage/              # SQLite
-└── validation/           # Zod schemas
+packages/pinmoli/
+├── src/
+│   ├── index.ts              # Entry point
+│   ├── agent/runtime.ts      # Agent initialization
+│   ├── skills/               # 5 tool implementations
+│   │   ├── sip-test.ts       # SIP testing tool
+│   │   ├── analyzer.ts       # Failure analysis
+│   │   ├── storage.ts        # Save/load/list tools
+│   │   └── index.ts          # Tool registration
+│   ├── sip/                  # SIP protocol
+│   │   ├── transport.ts      # UDP transport
+│   │   ├── sdp.ts            # SDP builder
+│   │   └── protocol.ts       # SIP utilities
+│   ├── storage/              # SQLite storage
+│   │   └── db.ts
+│   ├── validation/           # Zod schemas
+│   │   └── schemas.ts
+│   └── system-prompt.ts      # Domain restrictions
+├── test/
+│   ├── unit/                 # Unit tests (4 files)
+│   └── integration/          # Integration tests (3 files)
+├── test-*.js                 # Test scripts
+└── README.md                 # This file
 ```
 
 ## Testing
 
 ```bash
-npm test  # 35 tests
+# Run all tests (35 tests)
+npm test
+
+# Run with coverage
+npm run test:coverage
+
+# Run in watch mode
+npm run test:watch
+
+# Lint code
+npm run lint
 ```
+
+**Test Coverage:**
+- Unit tests: Protocol, SDP, storage, validation
+- Integration tests: LiveKit Cloud, SIP handler, end-to-end
+
+## Domain Restrictions
+
+Pinmoli is **strictly limited** to SIP/WebRTC testing:
+- ✅ SIP protocol testing (OPTIONS, INVITE, REGISTER)
+- ✅ WebRTC signaling analysis
+- ✅ SDP parsing and validation
+- ✅ Network diagnostics for VoIP
+- ❌ General networking tools
+- ❌ Non-SIP protocols
+- ❌ Unrelated tasks
+
+## Troubleshooting
+
+### Port Already in Use
+If you see "EADDRINUSE" errors, another process is using the SIP port:
+```bash
+# Find process using port 5060
+lsof -i :5060
+# Kill it if needed
+kill -9 <PID>
+```
+
+### Socket Cleanup
+The transport layer includes automatic socket cleanup. If tests hang, check for:
+- Firewall blocking UDP port 5060
+- Network connectivity issues
+- Invalid SIP endpoint
+
+### LiveKit Integration
+For LiveKit testing:
+1. Get credentials from LiveKit Cloud dashboard
+2. Add to `.env` file
+3. Use the provided test scripts
+4. Check `test/integration/livekit.test.ts` for examples
 
 ## License
 

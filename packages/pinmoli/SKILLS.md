@@ -1,433 +1,445 @@
 # Pinmoli Skills Reference
 
-## Overview
+Complete reference for all 5 Pinmoli tools. Use these for SIP/WebRTC protocol testing.
 
-Pinmoli has exactly **5 hardcoded skills** - no dynamic registration allowed. Each skill is domain-restricted to SIP/WebRTC testing only.
+## Tool 1: `sip_test`
 
----
+Execute SIP protocol tests against endpoints.
 
-## 1. sip_test
-
-Execute SIP protocol tests with real network communication.
-
-### Parameters
-
-```typescript
-{
-  uri: string;          // SIP URI (sip: or sips:)
-  method: 'OPTIONS' | 'INVITE' | 'REGISTER';
-  codecs: Array<'opus' | 'PCMU' | 'PCMA' | 'G722'>;
-  transport: 'udp' | 'tcp' | 'tls' | 'auto';
-  mediaPort?: number;   // Default: 10000
-  timeout?: number;     // Default: 5000ms
-}
-```
-
-### Returns
-
-Async generator yielding `SipEvent` objects:
-
-```typescript
-type SipEvent = {
-  type: 'sip' | 'rtp' | 'network' | 'diagnostic' | 'info' | 'error';
-  timestamp: number;
-  message: string;
-  method?: string;
-  status?: number;
-  sdpOffer?: string;
-  sdpAnswer?: string;
-  severity?: 'info' | 'warning' | 'error' | 'fatal';
-  code?: string;
-  recovery?: string;
-}
-```
-
-### Event Flow
-
-1. **network**: DNS resolution
-2. **network**: Socket binding
-3. **sip**: Request sent (with SDP offer for INVITE)
-4. **sip**: Response received (with status code)
-5. **error**: If timeout or failure
-
-### Examples
-
-```
-> test sip:example.com with OPTIONS
-
-> make an INVITE call to sip:5eezfwavhxe.sip.livekit.cloud using opus codec
-
-> send REGISTER to sip:pbx.company.com with PCMU and PCMA codecs
-```
-
-### Implementation
-
-- **File**: `src/skills/sip-test.ts`
-- **Transport**: `src/sip/transport.ts` (UDP dgram)
-- **SDP Builder**: `src/sip/sdp.ts`
-- **Validation**: Zod schema at skill boundary
-
----
-
-## 2. analyze_failure
-
-Analyze SIP test failures and provide actionable recovery steps.
+### Purpose
+Test SIP endpoints with standard SIP methods (OPTIONS, INVITE, REGISTER) to verify connectivity, capability negotiation, and protocol compliance.
 
 ### Parameters
 
 ```typescript
 {
-  events: SipEvent[];  // Array of events from failed test
+  endpoint: string;    // Required: SIP URI (e.g., "sip:example.sip.livekit.cloud")
+  method: string;      // Required: "OPTIONS" | "INVITE" | "REGISTER"
+  timeout?: number;    // Optional: Timeout in ms (default: 5000)
 }
 ```
-
-### Returns
-
-```typescript
-{
-  analysis: string;    // Detailed failure analysis
-  errorCode?: string;  // SIP error code if applicable
-  recovery: string[];  // List of recovery steps
-  commonCauses: string[];
-}
-```
-
-### Analysis Includes
-
-1. **Error Identification**: What went wrong
-2. **SIP Code Interpretation**: Meaning of status codes
-3. **Root Cause**: Why it failed
-4. **Recovery Steps**: How to fix it
-5. **Common Causes**: Typical reasons for this failure
 
 ### Examples
 
+**Health Check (OPTIONS):**
+```json
+{
+  "endpoint": "sip:5eezfwavhxe.sip.livekit.cloud",
+  "method": "OPTIONS"
+}
 ```
-> analyze the last test failure
 
-> why did that INVITE fail?
-
-> explain the 408 timeout error
+**Call Setup Test (INVITE):**
+```json
+{
+  "endpoint": "sip:5eezfwavhxe.sip.livekit.cloud",
+  "method": "INVITE",
+  "timeout": 10000
+}
 ```
 
-### Implementation
+**Registration Test:**
+```json
+{
+  "endpoint": "sip:pbx.example.com",
+  "method": "REGISTER"
+}
+```
 
-- **File**: `src/skills/analyzer.ts`
-- **Current**: Rule-based analysis
-- **TODO**: LLM-powered analysis for complex failures
+### Response Format
+
+```typescript
+{
+  success: boolean;
+  testId: string;           // UUID for this test
+  endpoint: string;
+  method: string;
+  timestamp: string;        // ISO 8601
+  duration: number;         // milliseconds
+  statusCode?: number;      // SIP status code (e.g., 200, 404)
+  statusText?: string;      // SIP status text (e.g., "OK")
+  events: Array<{
+    type: string;           // "request_sent" | "response_received" | "timeout" | "error"
+    timestamp: string;
+    message: string;
+    status?: number;
+    details?: any;
+  }>;
+  error?: string;
+}
+```
+
+### Common Status Codes
+- `200 OK` - Success
+- `100 Trying` - Processing (INVITE)
+- `180 Ringing` - Call ringing (INVITE)
+- `404 Not Found` - Endpoint not found
+- `408 Request Timeout` - No response
+- `503 Service Unavailable` - Server error
 
 ---
 
-## 3. save_test
+## Tool 2: `analyze_failure`
 
-Save a test configuration to collections for reuse.
+Analyze failed SIP tests and provide diagnostic insights.
+
+### Purpose
+Examine failed test results, identify root causes, and suggest remediation steps.
 
 ### Parameters
 
 ```typescript
 {
-  name: string;        // Unique collection name
-  config: TestConfig;  // Test configuration to save
+  testId: string;    // Required: UUID of the failed test
 }
 ```
 
-### Returns
+### Example
+
+```json
+{
+  "testId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+### Response Format
 
 ```typescript
 {
-  message: string;     // Confirmation message
-  id: string;          // Collection ID
+  testId: string;
+  analysis: {
+    rootCause: string;           // Primary failure reason
+    diagnostics: string[];       // Detailed diagnostic messages
+    recommendations: string[];   // Suggested fixes
+    relatedTests?: string[];     // Similar test IDs
+  };
+  testDetails: {
+    endpoint: string;
+    method: string;
+    timestamp: string;
+    error: string;
+    events: Array<any>;
+  };
 }
 ```
 
-### Storage
+### Common Failure Patterns
 
-- **Location**: `~/.pinmoli/pinmoli.db`
-- **Table**: `collections`
-- **Constraint**: Unique name (enforced by SQLite)
-- **Search**: Full-text search enabled
+**Network Issues:**
+- Timeout errors → Check firewall, network connectivity
+- Connection refused → Verify endpoint is running
+- DNS resolution failure → Check endpoint hostname
 
-### Examples
+**Protocol Issues:**
+- 404 Not Found → Endpoint doesn't exist
+- 403 Forbidden → Authentication required
+- 503 Service Unavailable → Server overloaded or down
 
-```
-> save this test as "production-health-check"
-
-> save current config as "livekit-options"
-
-> store this as "daily-monitoring"
-```
-
-### Implementation
-
-- **File**: `src/skills/storage.ts`
-- **Database**: `src/storage/db.ts`
-- **Validation**: Name uniqueness enforced
+**Configuration Issues:**
+- Invalid SDP → Check codec support
+- Port conflicts → Another process using port 5060
+- Malformed SIP URI → Verify endpoint format
 
 ---
 
-## 4. load_test
+## Tool 3: `save_test`
 
-Load a previously saved test configuration.
+Save a test configuration for later reuse.
+
+### Purpose
+Store frequently used test configurations with descriptive names for quick access.
 
 ### Parameters
 
 ```typescript
 {
-  name: string;  // Collection name to load
+  name: string;        // Required: Unique identifier (alphanumeric, hyphens, underscores)
+  endpoint: string;    // Required: SIP URI
+  method: string;      // Required: "OPTIONS" | "INVITE" | "REGISTER"
+  timeout?: number;    // Optional: Timeout in ms
 }
-```
-
-### Returns
-
-```typescript
-TestConfig | null  // Test configuration or null if not found
 ```
 
 ### Examples
 
+**Save Health Check:**
+```json
+{
+  "name": "livekit-health-check",
+  "endpoint": "sip:5eezfwavhxe.sip.livekit.cloud",
+  "method": "OPTIONS"
+}
 ```
-> load test "production-health-check"
 
-> run the "livekit-options" test
-
-> use saved test "daily-monitoring"
+**Save Load Test:**
+```json
+{
+  "name": "pbx-load-test",
+  "endpoint": "sip:pbx.example.com",
+  "method": "INVITE",
+  "timeout": 15000
+}
 ```
 
-### Implementation
+### Response Format
 
-- **File**: `src/skills/storage.ts`
-- **Database**: `src/storage/db.ts`
-- **Search**: Exact name match or FTS5 search
+```typescript
+{
+  success: boolean;
+  name: string;
+  message: string;    // Confirmation message
+}
+```
+
+### Naming Rules
+- Alphanumeric characters, hyphens, underscores only
+- Must be unique (will fail if name exists)
+- Case-sensitive
+- Max length: 255 characters
 
 ---
 
-## 5. list_tests
+## Tool 4: `load_test`
+
+Load and execute a previously saved test configuration.
+
+### Purpose
+Run saved tests without re-specifying parameters. Useful for regression testing and monitoring.
+
+### Parameters
+
+```typescript
+{
+  name: string;    // Required: Name of saved test
+}
+```
+
+### Example
+
+```json
+{
+  "name": "livekit-health-check"
+}
+```
+
+### Response Format
+
+Same as `sip_test` - executes the test and returns full test results.
+
+### Error Cases
+- Test name not found → Returns error with list of available tests
+- Test configuration invalid → Returns validation error
+
+---
+
+## Tool 5: `list_tests`
 
 List all saved test configurations.
 
+### Purpose
+View all saved tests with their configurations and metadata.
+
 ### Parameters
 
-```typescript
-{}  // No parameters
+None - this tool takes no parameters.
+
+### Example
+
+```json
+{}
 ```
 
-### Returns
+### Response Format
 
 ```typescript
 {
   tests: Array<{
     name: string;
-    timestamp: number;
-    uri: string;
+    endpoint: string;
     method: string;
+    timeout: number;
+    createdAt: string;      // ISO 8601
+    lastRun?: string;       // ISO 8601 of last execution
+    runCount: number;       // Number of times executed
   }>;
+  total: number;
 }
 ```
 
-### Examples
+### Example Response
 
+```json
+{
+  "tests": [
+    {
+      "name": "livekit-health-check",
+      "endpoint": "sip:5eezfwavhxe.sip.livekit.cloud",
+      "method": "OPTIONS",
+      "timeout": 5000,
+      "createdAt": "2026-02-22T10:30:00Z",
+      "lastRun": "2026-02-22T11:15:00Z",
+      "runCount": 42
+    },
+    {
+      "name": "pbx-registration",
+      "endpoint": "sip:pbx.example.com",
+      "method": "REGISTER",
+      "timeout": 5000,
+      "createdAt": "2026-02-22T09:00:00Z",
+      "runCount": 0
+    }
+  ],
+  "total": 2
+}
 ```
-> list my saved tests
-
-> show all test collections
-
-> what tests do I have?
-```
-
-### Implementation
-
-- **File**: `src/skills/storage.ts`
-- **Database**: `src/storage/db.ts`
-- **Ordering**: Most recent first
 
 ---
 
-## Skill Registration
+## Usage Patterns
 
-Skills are registered in `src/skills/index.ts` using TypeBox schemas (required by pi-agent-core):
+### Basic Testing Workflow
 
-```typescript
-export function createTools(): AgentTool[] {
-  return [
-    {
-      name: 'sip_test',
-      label: 'SIP Test',
-      description: 'Execute a SIP test with the given configuration',
-      parameters: Type.Object({
-        uri: Type.String({ description: 'SIP URI to test (sip: or sips:)' }),
-        method: Type.Union([Type.Literal('OPTIONS'), Type.Literal('INVITE'), Type.Literal('REGISTER')]),
-        codecs: Type.Array(Type.String()),
-        transport: Type.Union([Type.Literal('udp'), Type.Literal('tcp'), Type.Literal('tls'), Type.Literal('auto')])
-      }),
-      execute: async (_toolCallId, params): Promise<AgentToolResult<unknown>> => {
-        const events = [];
-        for await (const event of sipTestHandler(params as never)) {
-          events.push(event);
-        }
-        return {
-          content: [{ type: 'text', text: JSON.stringify(events, null, 2) }],
-          details: { events }
-        };
-      }
-    },
-    // ... other 4 tools
-  ];
-}
+1. **Test an endpoint:**
+   ```
+   Use sip_test with endpoint and method
+   ```
+
+2. **If test fails:**
+   ```
+   Use analyze_failure with the testId
+   ```
+
+3. **Save successful test:**
+   ```
+   Use save_test with a descriptive name
+   ```
+
+4. **Run saved test later:**
+   ```
+   Use load_test with the name
+   ```
+
+5. **View all saved tests:**
+   ```
+   Use list_tests
+   ```
+
+### Monitoring Workflow
+
 ```
+1. list_tests → Get all saved tests
+2. load_test → Run each test
+3. analyze_failure → Investigate any failures
+```
+
+### Development Workflow
+
+```
+1. sip_test → Test new endpoint
+2. Iterate with different methods/timeouts
+3. save_test → Save working configuration
+4. load_test → Verify saved test works
+```
+
+---
+
+## Natural Language Examples
+
+The AI agent can understand natural language requests:
+
+**Testing:**
+- "Test sip:example.sip.livekit.cloud with OPTIONS"
+- "Send an INVITE to sip:pbx.example.com"
+- "Check if sip:test.com is responding"
+
+**Analysis:**
+- "Why did test 550e8400-e29b-41d4-a716-446655440000 fail?"
+- "Analyze the last failed test"
+- "What went wrong with the LiveKit test?"
+
+**Management:**
+- "Save this test as 'daily-health-check'"
+- "Run the 'daily-health-check' test"
+- "Show me all saved tests"
+- "List my test configurations"
 
 ---
 
 ## Domain Restrictions
 
-All skills are **strictly limited** to SIP/WebRTC testing:
+These tools are **strictly limited** to SIP/WebRTC testing:
 
-### ✅ Allowed Operations
+✅ **Allowed:**
 - SIP protocol testing (OPTIONS, INVITE, REGISTER)
-- SDP offer/answer negotiation
-- Codec negotiation
-- Network diagnostics (DNS, socket binding)
-- Test configuration management
-- Failure analysis
+- WebRTC signaling analysis
+- SDP parsing and validation
+- VoIP endpoint testing
+- Network diagnostics for SIP/RTP
 
-### ❌ Forbidden Operations
-- File system access (except `~/.pinmoli/`)
-- Bash command execution
-- Package installation
-- Code editing
-- General programming tasks
-- Web scraping
+❌ **Not Allowed:**
+- General HTTP/HTTPS requests
+- Non-SIP network protocols
+- File system operations
 - Database operations (except internal storage)
+- Any non-VoIP related tasks
 
 ---
 
 ## Error Handling
 
-All skills follow the "errors as data" pattern:
+All tools return structured errors:
 
 ```typescript
-// Success
-yield {
-  type: 'sip',
-  timestamp: Date.now(),
-  status: 200,
-  message: '200 OK'
-};
-
-// Error
-yield {
-  type: 'error',
-  timestamp: Date.now(),
-  message: 'Connection timeout',
-  severity: 'fatal',
-  code: 'TIMEOUT',
-  recovery: 'Check network connectivity and firewall rules'
-};
+{
+  success: false;
+  error: string;           // Human-readable error message
+  code?: string;           // Error code (e.g., "TIMEOUT", "INVALID_ENDPOINT")
+  details?: any;           // Additional error context
+}
 ```
 
-No exceptions thrown - all errors are yielded as events.
+### Common Error Codes
+
+- `TIMEOUT` - Request timed out
+- `INVALID_ENDPOINT` - Malformed SIP URI
+- `NETWORK_ERROR` - Network connectivity issue
+- `PROTOCOL_ERROR` - SIP protocol violation
+- `NOT_FOUND` - Test or endpoint not found
+- `VALIDATION_ERROR` - Invalid parameters
 
 ---
 
-## Testing
+## Storage
 
-Each skill has comprehensive tests:
+All test data is stored in SQLite with FTS5 (Full-Text Search):
 
-- **Unit Tests**: Validation, schema parsing
-- **Integration Tests**: Real network calls to LiveKit
-- **E2E Tests**: Full flow with TUI integration
+**Location:** `~/.pinmoli/tests.db`
 
-See `test/integration/` for examples.
+**Tables:**
+- `tests` - Saved test configurations
+- `results` - Test execution results
+- `events` - Detailed event logs
 
----
-
-## Adding New Skills (Not Allowed)
-
-Pinmoli is **intentionally limited to 5 skills**. No dynamic registration.
-
-If you need additional functionality:
-1. Extend existing skills
-2. Add parameters to existing tools
-3. Enhance analysis capabilities
-
-Do NOT:
-- Add new tools
-- Create dynamic tool registration
-- Bypass the 5-tool limit
-
----
-
-## Skill Execution Flow
-
-```
-User Query
-    ↓
-Agent (Claude 3.5 Sonnet)
-    ↓
-Tool Selection (1 of 5 skills)
-    ↓
-Parameter Extraction
-    ↓
-Zod Validation
-    ↓
-Skill Execution (async generator)
-    ↓
-Event Stream (SipEvent[])
-    ↓
-TUI Display (circular buffer)
-    ↓
-Storage (SQLite history)
-```
+**Cleanup:**
+- Results older than 30 days are automatically archived
+- Failed tests are retained longer for analysis
+- Storage is automatically managed
 
 ---
 
 ## Performance
 
-- **sip_test**: ~100-500ms per test (network dependent)
-- **analyze_failure**: <10ms (rule-based)
-- **save_test**: <5ms (SQLite insert)
-- **load_test**: <5ms (SQLite query)
-- **list_tests**: <10ms (SQLite query with FTS5)
+**Typical Response Times:**
+- OPTIONS: 50-200ms
+- INVITE: 100-500ms (depends on server)
+- REGISTER: 100-300ms
 
----
+**Timeouts:**
+- Default: 5000ms
+- Recommended for INVITE: 10000ms
+- Maximum: 30000ms
 
-## Monitoring
-
-All skill executions are:
-- Logged to history table
-- Searchable via FTS5
-- Limited to last 100 executions (auto-cleanup)
-- Indexed by timestamp, result, status_code, URI
-
----
-
-## Future Enhancements
-
-Within existing skills:
-
-1. **sip_test**:
-   - Add TCP/TLS transport
-   - Support authentication (digest)
-   - RTP media handling
-   - Call termination (BYE/CANCEL)
-
-2. **analyze_failure**:
-   - LLM-powered analysis
-   - Pattern recognition
-   - Historical failure correlation
-
-3. **save_test**:
-   - Test suites (multiple tests)
-   - Scheduled execution
-   - Test templates
-
-4. **load_test**:
-   - Fuzzy search
-   - Tag-based filtering
-   - Version history
-
-5. **list_tests**:
-   - Pagination
-   - Sorting options
-   - Export to JSON
-
-All enhancements must stay within the 5-skill limit and domain restrictions.
+**Concurrency:**
+- Tools can run in parallel
+- Each test uses a unique UDP socket
+- Automatic socket cleanup after test completion
