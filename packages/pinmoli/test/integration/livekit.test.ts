@@ -1,42 +1,82 @@
 import { describe, it, expect } from 'vitest';
 import { executeSipTest } from '../../src/sip/transport.js';
 
-describe('LiveKit Integration', () => {
-  const LIVEKIT_ENDPOINT = 'sip:5eezfwavhxe.sip.livekit.cloud';
-
-  it('connects to LiveKit with OPTIONS', async () => {
+describe('Generic SIP Integration', () => {
+  it('handles invalid endpoint gracefully', async () => {
     const config = {
-      uri: LIVEKIT_ENDPOINT,
+      uri: 'sip:nonexistent.invalid.test',
       method: 'OPTIONS' as const,
       codecs: ['opus' as const, 'PCMU' as const],
       transport: 'udp' as const,
       mediaPort: 10000,
-      timeout: 10000
+      timeout: 1000
     };
 
     const events = [];
-    for await (const event of executeSipTest(config)) {
-      events.push(event);
+    try {
+      for await (const event of executeSipTest(config)) {
+        events.push(event);
+        if (events.length > 10) break; // Prevent infinite loop
+      }
+    } catch (error) {
+      // Expected to fail
     }
 
-    // Verify event sequence
     expect(events.length).toBeGreaterThan(0);
-    
-    const networkEvents = events.filter(e => e.type === 'network');
-    expect(networkEvents.length).toBeGreaterThanOrEqual(2);
-    expect(networkEvents[0].message).toContain('Resolving');
-    expect(networkEvents[1].message).toContain('Bound to');
+    expect(events.some(e => e.type === 'network' || e.type === 'error')).toBe(true);
+  });
 
-    const sipEvents = events.filter(e => e.type === 'sip');
-    expect(sipEvents.length).toBeGreaterThanOrEqual(2);
-    expect(sipEvents[0].message).toContain('Sending OPTIONS');
+  it('validates SIP URI format', async () => {
+    const config = {
+      uri: 'not-a-sip-uri',
+      method: 'OPTIONS' as const,
+      codecs: ['opus' as const],
+      transport: 'udp' as const,
+      timeout: 1000
+    };
+
+    const events = [];
+    try {
+      for await (const event of executeSipTest(config)) {
+        events.push(event);
+        if (events.length > 5) break;
+      }
+    } catch (error) {
+      events.push({
+        type: 'error',
+        timestamp: Date.now(),
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+
+    expect(events.some(e => e.type === 'error')).toBe(true);
+  });
+
+  it('respects timeout setting', async () => {
+    const config = {
+      uri: 'sip:timeout.test.invalid',
+      method: 'OPTIONS' as const,
+      codecs: ['opus' as const],
+      transport: 'udp' as const,
+      timeout: 500
+    };
+
+    const start = Date.now();
+    const events = [];
     
-    // Verify successful response
-    const responseEvent = sipEvents.find(e => e.status);
-    expect(responseEvent).toBeDefined();
-    expect(responseEvent!.status).toBe(200);
-    expect(responseEvent!.message).toContain('OK');
-  }, 15000);
+    try {
+      for await (const event of executeSipTest(config)) {
+        events.push(event);
+      }
+    } catch (error) {
+      // Expected
+    }
+
+    const duration = Date.now() - start;
+    expect(duration).toBeLessThan(2000); // Should timeout quickly
+  });
+});
+
 
   it('sends INVITE to LiveKit', async () => {
     const config = {

@@ -14,18 +14,36 @@ export function createTools(): AgentTool[] {
     {
       name: 'sip_test',
       label: 'SIP Test',
-      description: 'Execute a SIP test with the given configuration',
+      description: 'Execute a SIP test against an endpoint',
       parameters: Type.Object({
-        uri: Type.String({ description: 'SIP URI to test (sip: or sips:)' }),
+        endpoint: Type.String({ description: 'SIP URI (e.g., sip:example.com)' }),
         method: Type.Union([Type.Literal('OPTIONS'), Type.Literal('INVITE'), Type.Literal('REGISTER')]),
-        codecs: Type.Array(Type.String()),
-        transport: Type.Union([Type.Literal('udp'), Type.Literal('tcp'), Type.Literal('tls'), Type.Literal('auto')])
+        timeout: Type.Optional(Type.Number({ description: 'Timeout in milliseconds', default: 5000 }))
       }),
-      execute: async (_toolCallId, params): Promise<AgentToolResult<unknown>> => {
+      execute: async (_toolCallId, params: any): Promise<AgentToolResult<unknown>> => {
+        // Convert simple API to full config with smart defaults
+        const config = {
+          uri: params.endpoint,
+          method: params.method,
+          codecs: ['opus', 'PCMU', 'PCMA'] as const,
+          transport: 'auto' as const,
+          timeout: params.timeout || 5000
+        };
+        
         const events = [];
-        for await (const event of sipTestHandler(params as never)) {
-          events.push(event);
+        try {
+          for await (const event of sipTestHandler(config as never)) {
+            events.push(event);
+          }
+        } catch (error) {
+          events.push({
+            type: 'error',
+            timestamp: Date.now(),
+            message: error instanceof Error ? error.message : String(error),
+            severity: 'fatal'
+          });
         }
+        
         return {
           content: [{ type: 'text', text: JSON.stringify(events, null, 2) }],
           details: { events }
@@ -39,9 +57,9 @@ export function createTools(): AgentTool[] {
       label: 'Analyze Failure',
       description: 'Analyze SIP test failure and provide recovery suggestions',
       parameters: Type.Object({
-        events: Type.Array(Type.Any())
+        testId: Type.String({ description: 'UUID of the failed test' })
       }),
-      execute: async (_toolCallId, params): Promise<AgentToolResult<unknown>> => {
+      execute: async (_toolCallId, params: any): Promise<AgentToolResult<unknown>> => {
         const analysis = await analyzeFailureHandler(params as never);
         return {
           content: [{ type: 'text', text: analysis }],
@@ -54,12 +72,14 @@ export function createTools(): AgentTool[] {
     {
       name: 'save_test',
       label: 'Save Test',
-      description: 'Save a test configuration to collections',
+      description: 'Save a test configuration for later reuse',
       parameters: Type.Object({
-        name: Type.String(),
-        config: Type.Any()
+        name: Type.String({ description: 'Unique test name (alphanumeric, hyphens, underscores)' }),
+        endpoint: Type.String({ description: 'SIP URI' }),
+        method: Type.Union([Type.Literal('OPTIONS'), Type.Literal('INVITE'), Type.Literal('REGISTER')]),
+        timeout: Type.Optional(Type.Number({ description: 'Timeout in milliseconds' }))
       }),
-      execute: async (_toolCallId, params): Promise<AgentToolResult<unknown>> => {
+      execute: async (_toolCallId, params: any): Promise<AgentToolResult<unknown>> => {
         const result = await saveTestHandler(params as never);
         return {
           content: [{ type: 'text', text: result }],
@@ -72,11 +92,11 @@ export function createTools(): AgentTool[] {
     {
       name: 'load_test',
       label: 'Load Test',
-      description: 'Load a saved test configuration by name',
+      description: 'Load and execute a saved test configuration',
       parameters: Type.Object({
-        name: Type.String()
+        name: Type.String({ description: 'Name of the saved test' })
       }),
-      execute: async (_toolCallId, params): Promise<AgentToolResult<unknown>> => {
+      execute: async (_toolCallId, params: any): Promise<AgentToolResult<unknown>> => {
         const config = await loadTestHandler(params as never);
         return {
           content: [{ type: 'text', text: JSON.stringify(config, null, 2) }],
