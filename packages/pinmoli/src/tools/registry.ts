@@ -5,13 +5,14 @@
 
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 
-// Allowlist: Only these 5 tools can be registered
+// Allowlist: Only these 6 tools can be registered
 export const ALLOWED_TOOLS = [
   'sip_test',
   'analyze_failure',
   'save_test',
   'load_test',
-  'list_tests'
+  'list_tests',
+  'generate_audio'
 ] as const;
 
 export type AllowedToolName = typeof ALLOWED_TOOLS[number];

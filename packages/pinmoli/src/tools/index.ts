@@ -9,6 +9,7 @@ import { analyzeFailureTool } from './analyze-failure.js';
 import { saveTestTool } from './save-test.js';
 import { loadTestTool } from './load-test.js';
 import { listTestsTool } from './list-tests.js';
+import { generateAudioTool } from './generate-audio.js';
 
 /**
  * Register all SIP tools
@@ -20,6 +21,7 @@ export function registerAllTools(): void {
   registerTool(saveTestTool);
   registerTool(loadTestTool);
   registerTool(listTestsTool);
+  registerTool(generateAudioTool);
 }
 
 /**
