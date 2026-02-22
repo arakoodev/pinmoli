@@ -7,7 +7,9 @@ import dgram from 'dgram';
 import { generateCallId, generateTag } from './protocol.js';
 import { buildSdp } from './sdp.js';
 import { streamAudioFile, streamGeneratedAudio, type AudioSample } from './audio.js';
+import { receiveRTPAudio, saveAsWAV } from './rtp-receiver.js';
 import type { TestConfig, SipEvent } from '../validation/schemas.js';
+import { resolve } from 'path';
 
 /**
  * Generate SDP for INVITE
@@ -219,23 +221,48 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           };
         }
 
-        // Wait for agent response (listen for incoming audio)
+        // Wait for agent response (receive incoming audio)
         const waitTime = config.responseWaitTime ?? 10;
         yield {
           type: 'info',
           timestamp: Date.now(),
-          message: `Waiting for agent response (${waitTime}s)...`
+          message: `Listening for agent response (${waitTime}s)...`
         };
 
-        // Wait for agent's response
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, waitTime * 1000);
-        });
+        // Start RTP receiver
+        const outputFile = resolve(process.cwd(), 'audio-samples', `agent-response-${Date.now()}.wav`);
+        const rtpPromise = receiveRTPAudio(config.mediaPort, waitTime);
+
+        // Wait for reception to complete
+        const { packetsReceived, audioData } = await rtpPromise;
+
+        if (packetsReceived > 0) {
+          // Save as WAV file
+          saveAsWAV(audioData, outputFile);
+          
+          yield {
+            type: 'info',
+            timestamp: Date.now(),
+            message: `Received ${packetsReceived} RTP packets from agent`
+          };
+
+          yield {
+            type: 'info',
+            timestamp: Date.now(),
+            message: `Agent response saved to: ${outputFile}`
+          };
+        } else {
+          yield {
+            type: 'info',
+            timestamp: Date.now(),
+            message: `No audio received from agent (${waitTime}s timeout)`
+          };
+        }
 
         yield {
           type: 'info',
           timestamp: Date.now(),
-          message: 'Agent response window complete'
+          message: `Call was active for ${waitTime}s`
         };
 
         // Send BYE to hang up
