@@ -10,9 +10,16 @@
 - `SKILL.md` - Main skill teaching AI how to use Pinmoli
 - `README.md` - Documentation for skill structure
 
-**Purpose:** Teaches any AI assistant how to use Pinmoli for SIP/WebRTC testing
+**Purpose:** Teaches any AI assistant how to use Pinmoli for SIP/WebRTC testing with speech generation
 
 **Scope:** Available in all projects across all AI tools
+
+**Capabilities:**
+- SIP protocol testing (OPTIONS, INVITE, REGISTER)
+- Custom speech generation at runtime
+- Bidirectional voice conversations with AI agents
+- Configurable response wait times
+- Audio sample management
 
 **Symlinked to:**
 - `~/.config/gemini/skills/pinmoli` → Gemini CLI
@@ -31,6 +38,52 @@
 **Scope:** Only when working in `packages/pinmoli/` directory
 
 **Behavior:** Background skill (not user-invocable)
+
+## Current Features (v0.1.0)
+
+### 6 Tools Available
+
+1. **sip_test** - Execute SIP tests with speech
+   - OPTIONS, INVITE, REGISTER methods
+   - Custom audio samples
+   - Configurable response wait time (0-60s)
+   - Bidirectional conversation support
+
+2. **generate_audio** - Create custom audio at runtime
+   - Speech synthesis (espeak)
+   - Sine wave generation
+   - DTMF tones
+   - Silence
+
+3. **analyze_failure** - Diagnose test failures
+4. **save_test** - Save test configurations
+5. **load_test** - Load saved tests
+6. **list_tests** - List all saved tests
+
+### Audio Capabilities
+
+**Pre-generated Samples:**
+- voice-hello (default) - "Hello, this is a test call from Pinmoli"
+- sine-440hz, sine-1000hz - Tone generators
+- dtmf-123 - DTMF tones
+- silence - Silence
+
+**Runtime Generation:**
+- Custom speech from any text
+- Custom frequencies (20Hz-20kHz)
+- Custom durations (0.1s-30s)
+- All output as PCMU @ 8kHz mono
+
+### Bidirectional Conversation
+
+**Flow:**
+1. INVITE → 100/180/200 → ACK
+2. Send our audio (speech)
+3. Wait N seconds for agent response (configurable)
+4. BYE → hangup
+
+**Default wait time:** 10 seconds
+**Configurable:** 0-60 seconds via `responseWaitTime` parameter
 
 ## Skill Standard Compliance
 
@@ -97,6 +150,8 @@ Skills are discovered in priority order:
 **Auto-Invocation:**
 When user says:
 - "Test sip:example.com with OPTIONS"
+- "Generate speech saying hello world"
+- "Call the agent and wait 20 seconds for response"
 - "How do I test a SIP endpoint?"
 - "Debug this VoIP connection"
 - "Make a test call to LiveKit"
