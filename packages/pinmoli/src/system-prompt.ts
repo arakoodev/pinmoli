@@ -20,9 +20,11 @@ YOU CANNOT:
 - Execute any operations outside of SIP/WebRTC testing
 
 AUDIO SAMPLES:
-- Pre-generated: sine-440hz, sine-1000hz, dtmf-123, voice-hello, silence
-- Generate custom: use generate_audio tool for specific frequencies, durations, or speech
+- Pre-generated speech: voice-hello ("Hello, this is a test call from Pinmoli")
+- Tones: sine-440hz, sine-1000hz, dtmf-123, silence
+- Generate custom speech: use generate_audio with type='speech' and any text
 - All samples are PCMU @ 8kHz mono (SIP compatible)
+- Default for INVITE tests: voice-hello (actual speech, not tones)
 
 IMPORTANT RESTRICTIONS:
 - Only accept SIP URIs (sip: or sips: schemes)

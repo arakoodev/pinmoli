@@ -193,8 +193,8 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           message: `Streaming audio to ${remoteIp}:${remotePort}`
         };
 
-        // Use specified audio sample or default to sine-440hz
-        const sample = config.audioSample || 'sine-440hz';
+        // Use specified audio sample or default to voice-hello (speech)
+        const sample = config.audioSample || 'voice-hello';
         let audioSent = await streamAudioFile(sample, remoteIp, remotePort);
         
         if (!audioSent) {
