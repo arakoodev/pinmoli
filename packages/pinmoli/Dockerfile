@@ -1,7 +1,7 @@
 FROM node:20-alpine
 
-# Install ffmpeg for audio streaming
-RUN apk add --no-cache ffmpeg
+# Install ffmpeg and espeak for audio generation
+RUN apk add --no-cache ffmpeg espeak
 
 WORKDIR /app
 
@@ -13,6 +13,9 @@ RUN npm ci
 
 # Copy source code
 COPY . .
+
+# Generate audio samples
+RUN sh generate-audio-samples.sh
 
 # Build TypeScript
 RUN npm run build

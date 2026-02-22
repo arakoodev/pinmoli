@@ -48,6 +48,14 @@ export const CodecSchema = Type.Union([
   Type.Literal('G722')
 ]);
 
+export const AudioSampleSchema = Type.Union([
+  Type.Literal('sine-440hz'),
+  Type.Literal('sine-1000hz'),
+  Type.Literal('dtmf-123'),
+  Type.Literal('voice-hello'),
+  Type.Literal('silence')
+]);
+
 export const TransportSchema = Type.Union([
   Type.Literal('udp'),
   Type.Literal('tcp'),
@@ -63,6 +71,7 @@ export const TestConfigSchema = Type.Object({
   transport: TransportSchema,
   mediaPort: Type.Number({ minimum: 1024, maximum: 65535, default: 10000 }),
   timeout: Type.Number({ minimum: 1000, default: 5000 }),
+  audioSample: Type.Optional(AudioSampleSchema),
   auth: Type.Optional(Type.Object({
     username: Type.Optional(Type.String()),
     password: Type.Optional(Type.String())

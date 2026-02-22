@@ -4,9 +4,9 @@
  */
 
 import dgram from 'dgram';
-import { spawn } from 'child_process';
 import { generateCallId, generateTag } from './protocol.js';
 import { buildSdp } from './sdp.js';
+import { streamAudioFile, streamGeneratedAudio, type AudioSample } from './audio.js';
 import type { TestConfig, SipEvent } from '../validation/schemas.js';
 
 /**
@@ -193,13 +193,23 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           message: `Streaming audio to ${remoteIp}:${remotePort}`
         };
 
-        const audioSent = await sendAudio(remoteIp, remotePort);
+        // Use specified audio sample or default to sine-440hz
+        const sample = config.audioSample || 'sine-440hz';
+        let audioSent = await streamAudioFile(sample, remoteIp, remotePort);
+        
+        if (!audioSent) {
+          // Fallback to generated audio
+          audioSent = await streamGeneratedAudio('sine', remoteIp, remotePort, {
+            frequency: 440,
+            duration: 3
+          });
+        }
         
         if (audioSent) {
           yield {
             type: 'info',
             timestamp: Date.now(),
-            message: 'Audio stream complete (3s sine tone)'
+            message: `Audio stream complete (${sample})`
           };
         } else {
           yield {
@@ -271,33 +281,6 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
       recovery: 'Check network connectivity and SIP server configuration'
     };
   }
-}
-
-/**
- * Send audio using ffmpeg
- */
-async function sendAudio(remoteIp: string, remotePort: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const ffmpeg = spawn('ffmpeg', [
-      '-re', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
-      '-acodec', 'pcm_mulaw', '-ar', '8000', '-ac', '1',
-      '-f', 'rtp', `rtp://${remoteIp}:${remotePort}`,
-    ]);
-
-    ffmpeg.on('close', (code) => {
-      resolve(code === 0);
-    });
-
-    ffmpeg.on('error', () => {
-      resolve(false);
-    });
-
-    // Timeout after 5 seconds
-    setTimeout(() => {
-      ffmpeg.kill();
-      resolve(false);
-    }, 5000);
-  });
 }
 
 function buildOptionsRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string): string {

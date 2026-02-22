@@ -12,7 +12,8 @@ const config = {
   codecs: ['opus', 'PCMU'],
   transport: 'udp',
   mediaPort: 10000,
-  timeout: 15000
+  timeout: 15000,
+  audioSample: 'voice-hello'
 };
 
 console.log('Testing SIP engine with streaming events...\n');
