@@ -14,12 +14,12 @@ import { resolve } from 'path';
 /**
  * Generate SDP for INVITE
  */
-function generateSdp(codecs: readonly string[], mediaPort: number): string {
+function generateSdp(codecs: readonly string[], mediaPort: number, localIp: string): string {
   return buildSdp({
     sessionId: Date.now().toString(),
     sessionVersion: '1',
-    origin: '0.0.0.0',
-    connection: '0.0.0.0',
+    origin: localIp,
+    connection: localIp,
     mediaPort,
     codecs: [...codecs]
   });
@@ -52,13 +52,23 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
       message: `Resolved: ${host}:${port}`
     };
 
-    // Create UDP socket
-    const socket = dgram.createSocket('udp4');
+    // Create separate sockets for SIP signaling and RTP media
+    const sipSocket = dgram.createSocket('udp4');
+    const rtpSocket = dgram.createSocket('udp4');
+    
+    // Bind RTP socket to media port
+    await new Promise<void>((resolve, reject) => {
+      rtpSocket.once('error', reject);
+      rtpSocket.bind(config.mediaPort, () => {
+        rtpSocket.removeListener('error', reject);
+        resolve();
+      });
+    });
     
     yield {
       type: 'info',
       timestamp: Date.now(),
-      message: 'UDP socket created'
+      message: `RTP socket bound to port ${config.mediaPort}`
     };
 
     // Build SIP request
@@ -71,7 +81,23 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
     if (config.method === 'OPTIONS') {
       sipMessage = buildOptionsRequest(config.uri, host, port, callId, fromTag, branch);
     } else if (config.method === 'INVITE') {
-      const sdp = generateSdp(config.codecs, config.mediaPort);
+      // Get local IP for SDP
+      const { networkInterfaces } = await import('os');
+      const nets = networkInterfaces();
+      let localIp = '0.0.0.0';
+      
+      // Find first non-internal IPv4 address
+      for (const name of Object.keys(nets)) {
+        for (const net of nets[name] || []) {
+          if (net.family === 'IPv4' && !net.internal) {
+            localIp = net.address;
+            break;
+          }
+        }
+        if (localIp !== '0.0.0.0') break;
+      }
+      
+      const sdp = generateSdp(config.codecs, config.mediaPort, localIp);
       sipMessage = buildInviteRequest(config.uri, host, port, callId, fromTag, branch, sdp);
     } else if (config.method === 'REGISTER') {
       sipMessage = buildRegisterRequest(config.uri, host, port, callId, fromTag, branch);
@@ -90,7 +116,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
     
     await new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        socket.close();
+        sipSocket.close();
         if (responses.length === 0) {
           reject(new Error('Request timeout'));
         } else {
@@ -98,7 +124,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         }
       }, config.timeout);
 
-      socket.on('message', (msg) => {
+      sipSocket.on('message', (msg) => {
         const response = msg.toString();
         const statusMatch = response.match(/SIP\/2\.0 (\d+) (.+)/);
         
@@ -110,12 +136,12 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           responses.push({ statusCode, statusText, response });
 
           // Emit response immediately for yielding
-          socket.emit('response', { statusCode, statusText, duration, response });
+          sipSocket.emit('response', { statusCode, statusText, duration, response });
 
           // Close on final response (2xx, 3xx, 4xx, 5xx, 6xx) - but NOT for INVITE
           if (statusCode >= 200 && config.method !== 'INVITE') {
             clearTimeout(timeoutId);
-            socket.close();
+            sipSocket.close();
             resolve();
           } else if (statusCode >= 200 && config.method === 'INVITE') {
             // For INVITE, keep socket open for ACK/BYE
@@ -126,16 +152,16 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         }
       });
 
-      socket.on('error', (err) => {
+      sipSocket.on('error', (err) => {
         clearTimeout(timeoutId);
-        socket.close();
+        sipSocket.close();
         reject(err);
       });
 
-      socket.send(sipMessage, port, host, (err) => {
+      sipSocket.send(sipMessage, port, host, (err) => {
         if (err) {
           clearTimeout(timeoutId);
-          socket.close();
+          sipSocket.close();
           reject(err);
         }
       });
@@ -185,7 +211,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         };
 
         await new Promise<void>((resolve) => {
-          socket.send(ackMessage, port, host, () => resolve());
+          sipSocket.send(ackMessage, port, host, () => resolve());
         });
 
         // Send audio with ffmpeg
@@ -229,9 +255,9 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           message: `Listening for agent response (${waitTime}s)...`
         };
 
-        // Start RTP receiver
+        // Start RTP receiver on RTP socket
         const outputFile = resolve(process.cwd(), 'audio-samples', `agent-response-${Date.now()}.wav`);
-        const rtpPromise = receiveRTPAudio(config.mediaPort, waitTime);
+        const rtpPromise = receiveRTPAudio(rtpSocket, waitTime);
 
         // Wait for reception to complete
         const { packetsReceived, audioData } = await rtpPromise;
@@ -274,19 +300,19 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         };
 
         await new Promise<void>((resolve) => {
-          socket.send(byeMessage, port, host, () => resolve());
+          sipSocket.send(byeMessage, port, host, () => resolve());
         });
 
         // Wait for BYE response
         await new Promise<void>((resolve) => {
           const timeout = setTimeout(resolve, 1000);
-          socket.once('message', () => {
+          sipSocket.once('message', () => {
             clearTimeout(timeout);
             resolve();
           });
         });
 
-        socket.close();
+        sipSocket.close();
 
         yield {
           type: 'sip',

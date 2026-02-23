@@ -42,46 +42,39 @@ function parseRTPPacket(buffer: Buffer): RTPPacket | null {
 }
 
 /**
- * Receive RTP audio and save to file
+ * Receive RTP audio on an existing socket
  */
 export async function receiveRTPAudio(
-  port: number,
+  socket: dgram.Socket,
   duration: number,
   outputFile?: string
 ): Promise<{ packetsReceived: number; audioData: Buffer[] }> {
   return new Promise((resolve) => {
-    const socket = dgram.createSocket('udp4');
     const audioData: Buffer[] = [];
     let packetsReceived = 0;
 
-    socket.on('message', (msg) => {
+    const messageHandler = (msg: Buffer) => {
       const packet = parseRTPPacket(msg);
       if (packet && packet.payloadType === 0) { // PCMU
         audioData.push(packet.payload);
         packetsReceived++;
       }
-    });
+    };
 
-    socket.on('error', (err) => {
-      console.error('RTP receiver error:', err);
-      socket.close();
+    socket.on('message', messageHandler);
+
+    // Stop after duration
+    setTimeout(() => {
+      socket.off('message', messageHandler);
+
+      // Save to file if requested
+      if (outputFile && audioData.length > 0) {
+        const combinedAudio = Buffer.concat(audioData);
+        writeFileSync(outputFile, combinedAudio);
+      }
+
       resolve({ packetsReceived, audioData });
-    });
-
-    socket.bind(port, () => {
-      // Stop after duration
-      setTimeout(() => {
-        socket.close();
-
-        // Save to file if requested
-        if (outputFile && audioData.length > 0) {
-          const combinedAudio = Buffer.concat(audioData);
-          writeFileSync(outputFile, combinedAudio);
-        }
-
-        resolve({ packetsReceived, audioData });
-      }, duration * 1000);
-    });
+    }, duration * 1000);
   });
 }
 

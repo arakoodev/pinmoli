@@ -11,7 +11,7 @@ const config = {
   method: 'INVITE',
   codecs: ['opus', 'PCMU'],
   transport: 'udp',
-  mediaPort: 10000,
+  mediaPort: 20000,
   timeout: 15000
   // audioSample defaults to 'voice-hello' (actual speech)
 };
