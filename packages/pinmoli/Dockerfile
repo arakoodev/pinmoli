@@ -1,7 +1,7 @@
 FROM node:20-alpine
 
 # Install ffmpeg and espeak for audio generation
-RUN apk add --no-cache ffmpeg espeak
+RUN apk add --no-cache ffmpeg espeak tini
 
 WORKDIR /app
 
@@ -33,5 +33,5 @@ RUN npx vitest run test/unit/ test/integration/
 EXPOSE 5060/udp
 EXPOSE 10000/udp
 
-# Default command
-CMD ["node", "dist/cli.js"]
+ENTRYPOINT ["sh", "entrypoint.sh"]
+CMD ["npx", "tsx", "src/cli.ts"]

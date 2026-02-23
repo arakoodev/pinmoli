@@ -16,4 +16,4 @@ services:
       - GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION:-us-central1}
     stdin_open: true
     tty: true
-    command: npm run dev
+    command: ["npx", "tsx", "src/cli.ts", "--service-account", "/app/gcp-service-account.json"]

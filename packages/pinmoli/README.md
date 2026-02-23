@@ -1,316 +1,313 @@
-# Pinmoli - SIP/WebRTC Testing Tool
+# Pinmoli
 
-AI-powered SIP/WebRTC testing agent with 6 specialized tools for protocol testing, audio generation, failure analysis, and test management.
+*From Tamil பிபின்மொழி (pipin mozhi) -- "afterword"*
 
-**Purpose:** Generic SIP protocol testing tool that works with ANY standards-compliant SIP endpoint. Features bidirectional voice conversation with AI agents using custom speech generation.
+An AI-powered CLI for testing SIP and WebRTC voice endpoints. Point it at any SIP URI, describe what you want to test in plain English, and Pinmoli handles the protocol details -- INVITE flows, codec negotiation, RTP streaming, failure analysis.
 
-## Quick Start
+Think "Postman for Voice", but conversational.
 
-### Docker (Recommended)
-
-```bash
-# Build and run
-docker-compose up
-
-# Run tests
-docker-compose run pinmoli npm test
-
-# Run live tests with audio streaming
-docker-compose run pinmoli npm test -- test/live/
-
-# Run demo
-docker-compose run pinmoli npx tsx demo/sip-streaming.ts
 ```
+$ pinmoli
 
-See [DOCKER.md](./DOCKER.md) for detailed Docker usage.
+  Pinmoli - SIP/WebRTC Testing Agent
 
-### Local Development
+You: Test sip:+15551234567@trunk.example.com with INVITE, wait 15 seconds for a response
 
-```bash
-# Install dependencies
-npm install
+Pinmoli: Running INVITE test against sip:+15551234567@trunk.example.com...
 
-# Build
-npm run build
+  [sip_test] INVITE sip:+15551234567@trunk.example.com
+  ├─ 100 Trying (12ms)
+  ├─ 180 Ringing (45ms)
+  ├─ 200 OK (1203ms) — codec: PCMU/8000
+  ├─ ACK sent
+  ├─ RTP: sent 150 packets (voice-hello, 3.0s)
+  ├─ RTP: waiting 15s for agent response...
+  ├─ RTP: received 1247 packets (15.0s)
+  └─ BYE sent, 200 OK
 
-# Run tests
-npm test
-
-# Note: generate-audio-samples.sh requires ffmpeg and espeak (not needed at runtime)
+  Call completed successfully. The agent answered after 1.2s and spoke for
+  the full 15-second window. Codec negotiated: PCMU/8000 (G.711 u-law).
 ```
 
 ## Features
 
-- ✅ Complete SIP call flow (INVITE → ACK → RTP → BYE)
-- ✅ **Speech synthesis** (espeak text-to-speech)
-- ✅ **Custom audio generation** at runtime
-- ✅ **Bidirectional RTP** (send and receive on a single dgram socket)
-- ✅ **Configurable response wait time** (0-60s)
-- ✅ Real-time event streaming to TUI
-- ✅ Docker support with ffmpeg + espeak included
-- ✅ Works with any SIP endpoint
+- **Natural language interface** -- describe tests in plain English, the AI agent translates to SIP protocol operations
+- **Full SIP call flows** -- OPTIONS pings, INVITE with SDP offer/answer, REGISTER with auth, ACK, BYE
+- **Bidirectional RTP audio** -- send pre-generated or custom speech, receive and measure agent responses
+- **Runtime speech synthesis** -- generate custom TTS audio on the fly with espeak
+- **Failure analysis** -- pattern-matched diagnostics with actionable recovery steps
+- **Test persistence** -- save and reload test configurations (SQLite with FTS5)
+- **Works with any SIP endpoint** -- LiveKit, Daily.co, Twilio, Asterisk, FreeSWITCH, or any RFC 3261-compliant server
+- **Runs in Docker** -- all dependencies (ffmpeg, espeak, tini) included, no local setup required
 
-## RTP Architecture
+## Quick Start
 
-Pinmoli uses a **single dgram socket** for both sending and receiving RTP audio. This is critical for correct operation:
+### Prerequisites
+
+- Docker and Docker Compose
+- A GCP service account key (for the default Gemini LLM backend)
+
+### 1. Clone and configure
+
+```bash
+git clone https://github.com/nishirlabs/pinmoli.git
+cd pinmoli/packages/pinmoli
+
+# Place your GCP service account key
+cp /path/to/your-key.json gcp-service-account.json
+```
+
+### 2. Build and run
+
+```bash
+docker compose up -d --build
+docker compose exec pinmoli npx tsx src/cli.ts
+```
+
+You're in. Type a test request:
 
 ```
-rtpSocket(port N) ──send──▶ remote agent
-                   ◀──recv── remote agent responds to port N
+You: Send OPTIONS to sip:trunk.example.com
+You: INVITE sip:+15551234567@sip.livekit.cloud with opus and PCMU
+You: Generate speech saying "What is the weather today?" then call the agent
 ```
 
-Previously, ffmpeg was used for RTP transport. ffmpeg creates its own UDP socket with a random ephemeral port (e.g., 52341), but the RTP receiver listened on the port advertised in SDP (e.g., 54321). The remote peer would respond to the ffmpeg port, not the receiver port, so 0 packets were ever received. The fix was to drop ffmpeg for transport and send RTP packets directly from the same socket that listens for responses.
+### 3. Run without the AI agent
 
-**Key files:**
-- `src/sip/rtp-receiver.ts` — `buildRTPPacket()`, `sendRTPFromSocket()`, `receiveRTPAudio()`, `loadAudioSample()`
-- `src/sip/engine.ts` — orchestrates send-before-receive on the same socket
-- `src/sip/audio.ts` — `getAudioSamplePath()` resolves sample names to file paths
+If you just want to run SIP tests programmatically without the conversational TUI:
 
-### SIP Header IP Fix
-
-All `build*Request()` functions in `engine.ts` use `${localIp}:${localPort}` (detected via `os.networkInterfaces()`) in Via and Contact headers. Previously these were hardcoded to `0.0.0.0:5060`, which made SIP responses unroutable.
-
-### WAV Loading
-
-`loadAudioSample()` scans for the `data` subchunk marker rather than assuming a 44-byte header. Our PCMU WAV files (generated by `generate-audio-samples.sh`) include `fact` and `LIST` chunks, putting the data offset at ~84 bytes.
-
-## Audio Capabilities
-
-### Pre-generated Samples
-- **voice-hello** - "Hello, this is a test call from Pinmoli" (default)
-- sine-440hz, sine-1000hz - Tone generators
-- dtmf-123 - DTMF tones
-- silence - Silence
-
-### Runtime Generation
-Generate custom speech at any time:
-```
-User: "Generate speech saying 'What is the weather today?'"
-Agent: [Creates custom audio file]
-
-User: "Test the agent with that speech and wait 20 seconds for response"
-Agent: [Calls agent, sends speech, waits 20s, hangs up]
+```bash
+# OPTIONS ping
+docker compose exec pinmoli npx tsx -e "
+  import { runSipTest } from './src/sip/engine.js';
+  for await (const event of runSipTest({
+    uri: 'sip:trunk.example.com',
+    method: 'OPTIONS',
+    codecs: ['PCMU']
+  })) { console.log(JSON.stringify(event)); }
+"
 ```
 
 ## Configuration
 
-No configuration required. Pinmoli works with any standard SIP endpoint.
+### LLM Provider
 
-Simply provide the SIP URI when testing:
-- `sip:endpoint.example.com`
-- `sip:user@domain.com`
-- `sip:+1234567890@sip.livekit.cloud` (with phone number)
-- `sips:secure.example.com` (SIP over TLS)
+Pinmoli defaults to **Google Vertex AI (Gemini 2.5 Flash)**. The provider is configured in `src/cli.ts` and supports multiple backends:
 
-## Available Tools
+| Provider | Config value | Credentials |
+|----------|-------------|-------------|
+| Google Vertex AI | `google-vertex` (default) | `gcp-service-account.json` or `GOOGLE_APPLICATION_CREDENTIALS` |
+| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` env var |
+| OpenAI | `openai` | `OPENAI_API_KEY` env var |
 
-### 1. `sip_test` - Execute SIP Protocol Tests
-Tests SIP endpoints with OPTIONS, INVITE, or REGISTER methods.
-
-**Parameters:**
-- `uri` (string, required): SIP URI (e.g., `sip:endpoint.example.com`)
-- `method` (string, required): SIP method - `OPTIONS`, `INVITE`, or `REGISTER`
-- `codecs` (array, required): Audio codecs - `opus`, `PCMU`, `PCMA`, `G722`
-- `timeout` (number, optional): Timeout in milliseconds (default: 5000)
-- `audioSample` (string, optional): Audio sample to use (default: `voice-hello`)
-- `responseWaitTime` (number, optional): Seconds to wait for agent response (default: 10)
-
-**Example:**
-```javascript
-{
-  "uri": "sip:+1234567890@sip.livekit.cloud",
-  "method": "INVITE",
-  "codecs": ["opus", "PCMU"],
-  "audioSample": "voice-hello",
-  "responseWaitTime": 20
-}
-```
-
-### 2. `generate_audio` - Generate Custom Audio Samples
-Generate custom audio samples at runtime for testing.
-
-**Parameters:**
-- `type` (string, required): `sine`, `dtmf`, `silence`, or `speech`
-- `filename` (string, required): Output filename (without extension)
-- `frequency` (number, optional): Frequency in Hz for sine waves (20-20000)
-- `duration` (number, optional): Duration in seconds (0.1-30)
-- `text` (string, optional): Text to synthesize for speech
-- `digits` (string, optional): DTMF digits (0-9, *, #)
-
-**Example:**
-```javascript
-{
-  "type": "speech",
-  "filename": "greeting",
-  "text": "Hello, welcome to our service"
-}
-```
-
-### 3. `analyze_failure` - Analyze Test Failures
-Analyzes failed SIP tests and provides diagnostic insights.
-
-**Parameters:**
-- `testId` (string, required): ID of the failed test to analyze
-
-### 4. `save_test` - Save Test Configuration
-Saves a test configuration for later reuse.
-
-**Parameters:**
-- `name` (string, required): Unique name for the test
-- `config` (object, required): Test configuration
-
-### 5. `load_test` - Load Saved Test
-Loads and executes a previously saved test configuration.
-
-**Parameters:**
-- `name` (string, required): Name of the saved test
-
-### 6. `list_tests` - List All Saved Tests
-Lists all saved test configurations with their details.
-
-**Parameters:** None
-
-## Test Scripts
-
-Several test scripts are provided for direct testing:
+Set credentials at startup:
 
 ```bash
-# Test a SIP endpoint with OPTIONS
-node test-sip-options.js
+# Via CLI flag
+docker compose exec pinmoli npx tsx src/cli.ts --service-account /app/gcp-service-account.json
 
-# Test with INVITE
-node test-sip-invite.js
+# Or via the TUI slash command
+/service-account /path/to/key.json
+```
 
-# Test agent with natural language
-node test-agent.js
+### Environment Variables
 
-# Test tool directly (no agent)
-node test-tool-direct.js
+| Variable | Description |
+|----------|-------------|
+| `GOOGLE_APPLICATION_CREDENTIALS` | Path to GCP service account JSON |
+| `GOOGLE_CLOUD_PROJECT` | GCP project ID |
+| `GOOGLE_CLOUD_LOCATION` | GCP region (default: `us-central1`) |
+
+### Docker Compose
+
+The default `docker-compose.yml` uses `network_mode: host` so SIP and RTP traffic reaches the network directly. Modify if your setup requires bridged networking with explicit port mapping.
+
+## Tools
+
+Pinmoli exposes 6 tools to the AI agent. You don't call these directly -- you describe what you want and the agent picks the right tool. See [SKILLS.md](./SKILLS.md) for full parameter reference.
+
+| Tool | Purpose |
+|------|---------|
+| `sip_test` | Run OPTIONS, INVITE, or REGISTER against a SIP endpoint |
+| `generate_audio` | Create custom audio samples (sine, DTMF, silence, TTS speech) |
+| `analyze_failure` | Diagnose a failed test and suggest fixes |
+| `save_test` | Save a test configuration by name |
+| `load_test` | Reload and run a saved test |
+| `list_tests` | List all saved test configurations |
+
+## Audio Samples
+
+### Pre-generated (included in the Docker image)
+
+| Sample | Description | Duration |
+|--------|-------------|----------|
+| `voice-hello` | "Hello, this is a test call from Pinmoli" | ~3s |
+| `sine-440hz` | 440 Hz sine wave | 3s |
+| `sine-1000hz` | 1000 Hz sine wave | 3s |
+| `dtmf-123` | DTMF tones 1-2-3 | 1.5s |
+| `silence` | Silence | 3s |
+
+All samples are PCMU @ 8kHz mono (G.711 u-law), the standard SIP codec.
+
+### Runtime generation
+
+Ask the agent to generate custom speech:
+
+```
+You: Generate speech saying "Please transfer me to billing"
+You: Now call sip:+15551234567@trunk.example.com with that audio
+```
+
+Or generate tones:
+
+```
+You: Generate a 1000Hz sine wave for 5 seconds, then test the endpoint
 ```
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────┐
-│   AI Agent (Claude/GPT)             │
-│   - Natural language interface      │
-│   - Tool orchestration              │
-└──────────────┬──────────────────────┘
+┌──────────────────────────────────────┐
+│  TUI (pi-tui)                        │
+│  Terminal UI with streaming output    │
+└──────────────┬───────────────────────┘
                │
-┌──────────────▼──────────────────────┐
-│   5 Specialized Tools                │
-│   - sip_test                         │
-│   - analyze_failure                  │
-│   - save_test / load_test / list     │
-└──────────────┬──────────────────────┘
+┌──────────────▼───────────────────────┐
+│  AI Agent (pi-agent-core)            │
+│  LLM-driven tool orchestration       │
+│  Streams events to TUI in real time  │
+└──────────────┬───────────────────────┘
                │
-┌──────────────▼──────────────────────┐
-│   SIP Protocol Layer                 │
-│   - UDP transport (dgram)            │
-│   - SIP message builder              │
-│   - SDP builder                      │
-└──────────────┬──────────────────────┘
+┌──────────────▼───────────────────────┐
+│  6 Tools                             │
+│  sip_test, generate_audio,           │
+│  analyze_failure, save/load/list     │
+└──────────────┬───────────────────────┘
                │
-┌──────────────▼──────────────────────┐
-│   Storage Layer                      │
-│   - SQLite with FTS5                 │
-│   - Test configurations              │
-│   - Test results & history           │
+┌──────────────▼───────────────────────┐
+│  SIP Engine                          │
+│  UDP transport, SDP builder,         │
+│  RTP send/receive (single socket)    │
 └──────────────────────────────────────┘
 ```
+
+### Key design decisions
+
+- **Single RTP socket**: Send and receive on the same UDP socket so the remote peer responds to the correct port. Previous ffmpeg-based transport used an ephemeral port that didn't match the SDP advertisement.
+- **Async generators**: The SIP engine yields events as they happen (`async function*`), enabling real-time streaming to the TUI.
+- **Network-aware headers**: SIP Via/Contact headers use the detected network IP (via `os.networkInterfaces()`), not `0.0.0.0` or Docker-internal addresses.
 
 ## Project Structure
 
 ```
 packages/pinmoli/
 ├── src/
-│   ├── cli.ts                # TUI entry point (bin: pinmoli)
-│   ├── agent/runtime.ts      # Agent initialization (pi-agent-core)
-│   ├── skills/sip-test.ts    # SIP test skill handler
-│   ├── tools/                # 6 tool implementations
-│   ├── sip/                  # SIP protocol layer
-│   │   ├── engine.ts         # SIP test engine (INVITE/OPTIONS/REGISTER flows)
-│   │   ├── rtp-receiver.ts   # RTP build/send/receive/parse + WAV loading
-│   │   ├── audio.ts          # Audio sample resolution, ffmpeg streaming
-│   │   ├── sdp.ts            # SDP builder
-│   │   ├── transport.ts      # UDP transport
-│   │   └── protocol.ts       # SIP utilities (Call-ID, tags)
-│   ├── ui/tui.ts             # Console-based TUI
-│   ├── storage/db.ts         # SQLite + FTS5
-│   └── validation/schemas.ts # TypeBox schemas
-├── audio-samples/            # Pre-generated PCMU WAV files
+│   ├── cli.ts                  # Entry point
+│   ├── agent/runtime.ts        # AI agent setup (pi-agent-core)
+│   ├── ui/tui.ts               # Terminal UI (pi-tui)
+│   ├── tools/                  # 6 tool implementations
+│   ├── sip/
+│   │   ├── engine.ts           # SIP test orchestration
+│   │   ├── rtp-receiver.ts     # RTP packet build/parse/send/receive
+│   │   ├── audio.ts            # Audio sample resolution
+│   │   ├── sdp.ts              # SDP builder
+│   │   ├── transport.ts        # UDP transport
+│   │   └── protocol.ts         # SIP utilities
+│   ├── storage/db.ts           # SQLite persistence
+│   ├── validation/schemas.ts   # Input validation (TypeBox)
+│   └── system-prompt.ts        # Agent system prompt
+├── audio-samples/              # Pre-generated PCMU WAV files
 ├── test/
-│   ├── unit/                 # 11 files, 74 tests
-│   ├── integration/          # LiveKit + generic SIP tests
-│   └── live/                 # TUI flow tests against LiveKit
-├── test-livekit-full.js      # Full INVITE flow test script
-└── generate-audio-samples.sh # Regenerate WAV files (requires ffmpeg + espeak)
+│   ├── unit/                   # Protocol, SDP, RTP, storage, validation
+│   ├── integration/            # TUI flows, end-to-end, bidirectional RTP
+│   └── live/                   # Tests against real SIP endpoints
+├── generate-audio-samples.sh   # Regenerate WAV files (ffmpeg + espeak)
+├── Dockerfile                  # Alpine + ffmpeg + espeak + tini
+├── docker-compose.yml
+└── entrypoint.sh
 ```
 
 ## Testing
 
+All tests run inside Docker.
+
 ```bash
-# Run all unit tests (74 tests, ~1s)
-npm test
+# Start the container
+cd packages/pinmoli
+docker compose up -d
 
-# Run live TUI tests against LiveKit (7 tests, ~10s)
-npx vitest run test/live/livekit.test.ts
+# Run all tests
+docker compose exec pinmoli npx vitest run
 
-# Run integration tests against LiveKit (8 tests, ~15s)
-npx vitest run test/integration/livekit.test.ts
+# Unit tests only (~1s)
+docker compose exec pinmoli npx vitest run test/unit/
 
-# Run full INVITE flow with audio send/receive
-node test-livekit-full.js
+# Integration tests
+docker compose exec pinmoli npx vitest run test/integration/
 
-# Run with coverage
-npm run test:coverage
+# Live tests (hits real SIP endpoints, requires network)
+docker compose exec pinmoli npx vitest run test/live/
 
-# Run in watch mode
-npm run test:watch
+# Type-check
+docker compose exec pinmoli npx tsc --noEmit
 
-# Lint code
-npm run lint
+# Lint
+docker compose exec pinmoli npm run lint
 ```
-
-**Test suites:**
-- `test/unit/` — 11 files, 74 tests: protocol, SDP, storage, validation, schemas, RTP roundtrip, WAV loading, tool registry
-- `test/live/livekit.test.ts` — 7 tests: TUI flows (OPTIONS, INVITE, codec matrix, error handling, sequential tests)
-- `test/integration/livekit.test.ts` — 8 tests: real SIP against LiveKit (INVITE, SDP validation, media port, timeouts)
-- `test/integration/generic-sip.test.ts` — error handling for invalid endpoints
-
-## Domain Restrictions
-
-Pinmoli is **strictly limited** to SIP/WebRTC testing:
-- ✅ SIP protocol testing (OPTIONS, INVITE, REGISTER)
-- ✅ WebRTC signaling analysis
-- ✅ SDP parsing and validation
-- ✅ Network diagnostics for VoIP
-- ❌ General networking tools
-- ❌ Non-SIP protocols
-- ❌ Unrelated tasks
 
 ## Troubleshooting
 
-### Port Already in Use
-If you see "EADDRINUSE" errors, another process is using the SIP port:
+### Port 5060 already in use
+
+Only one process can bind the SIP port. Kill the conflicting process inside the container:
+
 ```bash
-# Find process using port 5060
-lsof -i :5060
-# Kill it if needed
-kill -9 <PID>
+docker compose exec pinmoli sh -c 'kill $(lsof -ti:5060)'
 ```
 
-### Socket Cleanup
-The transport layer includes automatic socket cleanup. If tests hang, check for:
-- Firewall blocking UDP port 5060
-- Network connectivity issues
-- Invalid SIP endpoint
+### No RTP packets received
 
-### No RTP Packets Received
-If the INVITE flow works but `packetsReceived` is 0:
-1. **NAT/firewall** — your host must be reachable on the RTP port advertised in SDP. WSL2 private IPs (172.x) are not routable from the internet.
-2. **No agent running** — the remote SIP endpoint accepted the call but has no AI agent worker to generate audio.
-3. Run from a host with a public IP or inside Docker with proper port forwarding.
+1. **NAT/firewall** -- the host must be reachable on the RTP port advertised in SDP. Private IPs (WSL2 `172.x`, Docker `172.x`) are not routable from the internet.
+2. **No agent running** -- the remote SIP endpoint accepted the call but has no worker to generate audio.
+3. Run from a host with a public IP or use Docker with `network_mode: host`.
+
+### 503 Service Unavailable after 60s
+
+This is usually a synthetic 503 generated by the `sip` npm library when the remote drops the TCP connection (e.g., LiveKit agent timeout). It's not a real SIP 503. Common causes:
+- AI agent worker not running on the remote side
+- Malformed SDP or unroutable IPs in headers
+- Missing ACK after 200 OK
+
+### LLM not responding
+
+Check that your credentials are configured:
+
+```bash
+# Verify the service account file exists in the container
+docker compose exec pinmoli ls -la /app/gcp-service-account.json
+
+# Or set via environment
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
+```
+
+## Contributing
+
+```bash
+# Fork and clone
+git clone https://github.com/your-fork/pinmoli.git
+cd pinmoli/packages/pinmoli
+
+# Build the container
+docker compose build
+
+# Run tests (must pass before submitting a PR)
+docker compose up -d
+docker compose exec pinmoli npx vitest run
+docker compose exec pinmoli npx tsc --noEmit
+docker compose exec pinmoli npm run lint
+```
+
+All commands run inside Docker -- the container includes ffmpeg, espeak, and other dependencies that aren't available locally.
 
 ## License
 
