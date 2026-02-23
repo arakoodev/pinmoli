@@ -118,6 +118,14 @@ export class PinmoliAgent {
   }
 
   /**
+   * Switch to a different LLM provider/model at runtime
+   */
+  switchModel(provider: string, modelId: string): void {
+    this.model = getModel(provider as any, modelId as any);
+    this.agent.setModel(this.model);
+  }
+
+  /**
    * Abort in-flight agent work (cancels LLM stream and tool execution)
    */
   abort(): void {

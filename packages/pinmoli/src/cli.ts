@@ -7,14 +7,14 @@
 
 import { PinmoliTUI } from './ui/tui.js';
 import { PinmoliAgent } from './agent/runtime.js';
+import { configureServiceAccount, isVertexConfigured } from './commands/service-account.js';
 import type { Config } from './validation/schemas.js';
 
-// Default configuration
+// Default configuration — google-vertex with deferred credentials
 const config: Config = {
   llm: {
-    provider: 'anthropic',
-    model: 'claude-3-5-sonnet-20241022',
-    apiKey: process.env.ANTHROPIC_API_KEY
+    provider: 'google-vertex',
+    model: 'gemini-2.5-flash'
   },
   sip: {
     defaultPort: 5060,
@@ -26,15 +26,53 @@ const config: Config = {
   }
 };
 
+/**
+ * Handle slash commands. Returns true if input was a slash command.
+ */
+function handleSlashCommand(input: string, agent: PinmoliAgent, tui: PinmoliTUI): boolean {
+  const match = input.match(/^\/service-account\s+(.+)$/);
+  if (match) {
+    const result = configureServiceAccount(match[1].trim());
+    if (result.success) {
+      agent.switchModel(config.llm.provider, config.llm.model);
+      tui.addMessage('system', result.message);
+    } else {
+      tui.addMessage('system', `Error: ${result.message}`);
+    }
+    return true;
+  }
+  return false;
+}
+
+function parseArgs(): { serviceAccount?: string } {
+  const args = process.argv.slice(2);
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--service-account' && args[i + 1]) {
+      return { serviceAccount: args[i + 1] };
+    }
+  }
+  return {};
+}
+
 async function main() {
   console.log('Pinmoli - SIP Testing Agent');
   console.log('Version 0.1.0\n');
 
-  // Check for API key
-  if (!config.llm.apiKey) {
-    console.error('Error: ANTHROPIC_API_KEY environment variable not set');
-    console.error('Please set it: export ANTHROPIC_API_KEY=your-key');
-    process.exit(1);
+  // Handle --service-account flag
+  const args = parseArgs();
+  if (args.serviceAccount) {
+    const result = configureServiceAccount(args.serviceAccount);
+    if (result.success) {
+      console.log(result.message + '\n');
+    } else {
+      console.error(`Error: ${result.message}`);
+      process.exit(1);
+    }
+  }
+
+  // Non-fatal warning if Vertex isn't configured yet
+  if (!isVertexConfigured()) {
+    console.log('Vertex AI not configured. Use --service-account <path> or /service-account <path>.\n');
   }
 
   console.log('Initializing agent...');
@@ -57,6 +95,17 @@ async function main() {
 
       if (!input) continue;
       if (input === 'exit' || input === 'quit') break;
+
+      // Handle slash commands before sending to agent
+      if (input.startsWith('/') && handleSlashCommand(input, agent, tui)) {
+        continue;
+      }
+
+      // Check credentials before LLM call
+      if (!isVertexConfigured()) {
+        tui.addMessage('system', 'Vertex AI not configured. Run /service-account <path-to-json> first.');
+        continue;
+      }
 
       tui.addMessage('user', input);
       tui.setAgentBusy(true);

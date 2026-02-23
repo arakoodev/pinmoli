@@ -14,8 +14,10 @@ import {
   Editor,
   Key,
   matchesKey,
+  CombinedAutocompleteProvider,
   type Terminal,
   type EditorTheme,
+  type SlashCommand,
 } from '@mariozechner/pi-tui';
 import { ToolOutputSection } from './tool-output.js';
 
@@ -74,6 +76,16 @@ export class PinmoliTUI {
         }
       };
       this.editor = new Editor(this.tui, theme, { paddingX: 1 });
+
+      // Slash command autocomplete with file path fallback
+      const slashCommands: SlashCommand[] = [
+        {
+          name: 'service-account',
+          description: 'Set GCP service account JSON path for Vertex AI',
+          getArgumentCompletions: () => null
+        }
+      ];
+      this.editor.setAutocompleteProvider(new CombinedAutocompleteProvider(slashCommands));
 
       this.tui.addChild(this.chatContainer);
       this.tui.addChild(this.editor);

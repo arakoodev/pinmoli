@@ -31,7 +31,7 @@ export type SipEvent = Static<typeof SipEventSchema>;
 
 // SIP protocol validation
 export const SipUriSchema = Type.String({
-  pattern: '^sips?:[a-zA-Z0-9@.:-]+$',
+  pattern: '^sips?:[a-zA-Z0-9@.:+\\-]+$',
   description: 'SIP URI to test. For LiveKit (*.sip.livekit.cloud), MUST include a phone number — bare host returns 404. Format: sip:+1XXXXXXXXXX@host.',
   examples: ['sip:+15551234567@5eezfwavhxe.sip.livekit.cloud', 'sip:alice@pbx.example.com']
 });
@@ -132,6 +132,7 @@ export const ConfigSchema = Type.Object({
     provider: Type.Union([
       Type.Literal('anthropic'),
       Type.Literal('openai'),
+      Type.Literal('google-vertex'),
       Type.Literal('local')
     ]),
     model: Type.String(),
