@@ -47,9 +47,33 @@ npm test
 - ✅ **Bidirectional conversation** with voice agents
 - ✅ **Configurable response wait time** (0-60s)
 - ✅ Real-time event streaming to TUI
+## Features
+
+- ✅ Complete SIP call flow (INVITE → ACK → RTP → BYE)
+- ✅ **Speech synthesis** (espeak text-to-speech)
+- ✅ **Custom audio generation** at runtime
+- ✅ **Bidirectional conversation** with voice agents
+- ✅ **Configurable response wait time** (0-60s)
+- ✅ **RTP audio transmission** (sends speech to agents)
+- ⚠️ **RTP audio reception** (work in progress - socket binding issues)
+- ✅ Real-time event streaming to TUI
 - ✅ 101 tests (unit + integration + live + speech)
 - ✅ Docker support with ffmpeg + espeak included
 - ✅ Works with any SIP endpoint
+
+## Current Status
+
+**Working:**
+- SIP protocol (INVITE, OPTIONS, REGISTER)
+- Audio transmission to SIP endpoints
+- Speech synthesis and custom audio generation
+- Bidirectional call flow (send audio, wait for response, hangup)
+- LiveKit integration (calls connect successfully)
+
+**In Progress:**
+- RTP audio reception (receiving agent responses)
+- Port binding conflicts need resolution
+- Network configuration for incoming RTP packets
 
 ## Audio Capabilities
 

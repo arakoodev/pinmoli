@@ -41,6 +41,20 @@
 
 ## Current Features (v0.1.0)
 
+### Status
+
+**Working:**
+- SIP protocol (INVITE, OPTIONS, REGISTER)
+- Audio transmission to SIP endpoints
+- Speech synthesis and custom audio generation
+- Bidirectional call flow (send audio, wait for response, hangup)
+- LiveKit integration (calls connect successfully)
+
+**In Progress:**
+- RTP audio reception (receiving agent responses)
+- Port binding conflicts need resolution
+- Network configuration for incoming RTP packets
+
 ### 6 Tools Available
 
 1. **sip_test** - Execute SIP tests with speech
@@ -48,6 +62,7 @@
    - Custom audio samples
    - Configurable response wait time (0-60s)
    - Bidirectional conversation support
+   - Sends audio to agents successfully
 
 2. **generate_audio** - Create custom audio at runtime
    - Speech synthesis (espeak)
@@ -78,12 +93,15 @@
 
 **Flow:**
 1. INVITE → 100/180/200 → ACK
-2. Send our audio (speech)
-3. Wait N seconds for agent response (configurable)
-4. BYE → hangup
+2. Send our audio (speech) ✅
+3. Wait N seconds for agent response (configurable) ✅
+4. Receive agent's RTP audio ⚠️ (in progress)
+5. BYE → hangup ✅
 
 **Default wait time:** 10 seconds
 **Configurable:** 0-60 seconds via `responseWaitTime` parameter
+
+**Current Limitation:** Audio transmission works, but reception has port binding issues being debugged.
 
 ## Skill Standard Compliance
 
