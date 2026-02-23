@@ -121,6 +121,23 @@ export async function streamGeneratedAudio(
 }
 
 /**
+ * Resolve an audio sample name to an absolute file path.
+ * Returns null if the file doesn't exist.
+ */
+export function getAudioSamplePath(sample: AudioSample | string): string | null {
+  let filePath: string;
+
+  if (sample in AUDIO_SAMPLES) {
+    filePath = resolve(__dirname, '../../audio-samples', AUDIO_SAMPLES[sample as AudioSample]);
+  } else {
+    filePath = sample; // Assume it's a direct file path
+  }
+
+  if (!existsSync(filePath)) return null;
+  return filePath;
+}
+
+/**
  * List available audio samples
  */
 export function listAudioSamples(): Array<{ name: string; file: string }> {

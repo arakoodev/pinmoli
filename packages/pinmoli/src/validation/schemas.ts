@@ -30,23 +30,28 @@ export const SipEventSchema = Type.Object({
 export type SipEvent = Static<typeof SipEventSchema>;
 
 // SIP protocol validation
-export const SipUriSchema = Type.String({ 
+export const SipUriSchema = Type.String({
   pattern: '^sips?:[a-zA-Z0-9@.:-]+$',
-  description: 'Must be valid SIP URI (sip: or sips:)'
+  description: 'SIP URI to test. For LiveKit (*.sip.livekit.cloud), MUST include a phone number — bare host returns 404. Format: sip:+1XXXXXXXXXX@host.',
+  examples: ['sip:+15551234567@5eezfwavhxe.sip.livekit.cloud', 'sip:alice@pbx.example.com']
 });
 
 export const SipMethodSchema = Type.Union([
   Type.Literal('OPTIONS'),
   Type.Literal('INVITE'),
   Type.Literal('REGISTER')
-]);
+], {
+  description: 'SIP method. OPTIONS = connectivity check (no audio). INVITE = full call with audio. REGISTER = registration with auth.'
+});
 
 export const CodecSchema = Type.Union([
   Type.Literal('opus'),
   Type.Literal('PCMU'),
   Type.Literal('PCMA'),
   Type.Literal('G722')
-]);
+], {
+  description: 'Audio codec. LiveKit typically selects PCMU. Offer ["opus", "PCMU"] for compatibility.'
+});
 
 export const AudioSampleSchema = Type.Union([
   Type.Literal('sine-440hz'),
@@ -54,36 +59,64 @@ export const AudioSampleSchema = Type.Union([
   Type.Literal('dtmf-123'),
   Type.Literal('voice-hello'),
   Type.Literal('silence')
-]);
+], {
+  description: 'Audio to send during INVITE. "voice-hello" recommended for voice agents, "silence" to just listen.'
+});
 
 export const TransportSchema = Type.Union([
   Type.Literal('udp'),
   Type.Literal('tcp'),
   Type.Literal('tls'),
   Type.Literal('auto')
-]);
+], {
+  description: 'Transport protocol. "auto" recommended for most cases. Use "tls" for sips: URIs.'
+});
 
 // Test configuration
 export const TestConfigSchema = Type.Object({
   uri: SipUriSchema,
   method: SipMethodSchema,
-  codecs: Type.Array(CodecSchema, { minItems: 1 }),
+  codecs: Type.Array(CodecSchema, {
+    minItems: 1,
+    description: 'Codecs to offer in SDP. LiveKit typically selects PCMU. Offer ["opus", "PCMU"] for compatibility.',
+    examples: [['opus', 'PCMU']]
+  }),
   transport: TransportSchema,
   mediaPort: Type.Number({ minimum: 1024, maximum: 65535, default: 10000 }),
-  timeout: Type.Number({ minimum: 1000, default: 5000 }),
+  timeout: Type.Number({
+    minimum: 1000,
+    default: 5000,
+    description: 'SIP transaction timeout in milliseconds.',
+    examples: [5000, 30000]
+  }),
   audioSample: Type.Optional(AudioSampleSchema),
-  responseWaitTime: Type.Optional(Type.Number({ 
-    minimum: 0, 
+  responseWaitTime: Type.Optional(Type.Number({
+    minimum: 0,
     maximum: 60,
     default: 10,
-    description: 'Seconds to wait for agent response after sending audio' 
+    description: 'Seconds to wait for agent response after sending audio. Increase for slow agents.',
+    examples: [10, 30]
+  })),
+  sendDelay: Type.Optional(Type.Number({
+    minimum: 0,
+    maximum: 60,
+    default: 0,
+    description: 'Seconds to listen for agent greeting BEFORE sending audio. 0 = send immediately. Use 8 for voice agents that speak first.',
+    examples: [0, 8]
   })),
   auth: Type.Optional(Type.Object({
     username: Type.Optional(Type.String()),
     password: Type.Optional(Type.String())
+  }, {
+    description: 'Auth credentials. Usually required for REGISTER. Rarely needed for OPTIONS/INVITE.'
   })),
-  headers: Type.Optional(Type.Record(Type.String(), Type.String())),
-  customSdp: Type.Optional(Type.String())
+  headers: Type.Optional(Type.Record(Type.String(), Type.String(), {
+    description: 'Custom SIP headers to include in the request.',
+    examples: [{ 'X-Custom-Header': 'value' }]
+  })),
+  customSdp: Type.Optional(Type.String({
+    description: 'Raw SDP to use instead of auto-generated. Must use CRLF line endings.'
+  }))
 });
 
 export type TestConfig = Static<typeof TestConfigSchema>;

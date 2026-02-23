@@ -65,14 +65,15 @@ describe('Tool Registry', () => {
   });
 
   describe('ALLOWED_TOOLS', () => {
-    it('contains exactly 5 SIP tools', () => {
-      expect(ALLOWED_TOOLS).toHaveLength(5);
+    it('contains exactly 6 SIP tools', () => {
+      expect(ALLOWED_TOOLS).toHaveLength(6);
       expect(ALLOWED_TOOLS).toEqual([
         'sip_test',
         'analyze_failure',
         'save_test',
         'load_test',
-        'list_tests'
+        'list_tests',
+        'generate_audio'
       ]);
     });
   });

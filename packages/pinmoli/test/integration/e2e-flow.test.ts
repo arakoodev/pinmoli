@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { PinmoliAgent } from '../../src/agent/runtime.js';
 import { PinmoliTUI } from '../../src/ui/tui.js';
+import { TestTerminal } from '../../src/ui/test-terminal.js';
 import type { Config } from '../../src/validation/schemas.js';
 
 /**
@@ -10,7 +11,7 @@ import type { Config } from '../../src/validation/schemas.js';
 
 describe('End-to-End Flow Tests', () => {
   let config: Config;
-  let output: string[];
+  let terminal: TestTerminal;
 
   beforeEach(() => {
     config = {
@@ -26,19 +27,12 @@ describe('End-to-End Flow Tests', () => {
       }
     };
 
-    output = [];
-    vi.spyOn(console, 'log').mockImplementation((...args) => {
-      output.push(args.join(' '));
-    });
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
-      output.push(chunk.toString());
-      return true;
-    });
+    terminal = new TestTerminal();
   });
 
   describe('Agent + TUI Integration', () => {
     it('wires agent events to TUI streaming', () => {
-      const tui = new PinmoliTUI();
+      const tui = new PinmoliTUI(terminal);
       const agent = new PinmoliAgent(config, tui);
 
       expect(agent).toBeDefined();
@@ -46,7 +40,7 @@ describe('End-to-End Flow Tests', () => {
     });
 
     it('TUI receives tool execution events', async () => {
-      const tui = new PinmoliTUI();
+      const tui = new PinmoliTUI(terminal);
       const agent = new PinmoliAgent(config, tui);
 
       // Simulate tool execution by directly calling streamMessage
@@ -54,7 +48,7 @@ describe('End-to-End Flow Tests', () => {
       tui.streamMessage('\n  [INFO] Starting test');
       tui.streamMessage('\n[Tool] Complete\n');
 
-      const fullOutput = output.join('');
+      const fullOutput = terminal.getFullOutput();
       expect(fullOutput).toContain('[Tool] Executing sip_test');
       expect(fullOutput).toContain('[INFO] Starting test');
       expect(fullOutput).toContain('[Tool] Complete');
@@ -63,26 +57,26 @@ describe('End-to-End Flow Tests', () => {
 
   describe('SIP Test Flow', () => {
     it('handles OPTIONS test flow', () => {
-      const tui = new PinmoliTUI();
+      const tui = new PinmoliTUI(terminal);
       tui.start();
 
       // User request
       tui.addMessage('user', 'Test sip:example.com with OPTIONS method');
-      
+
       // Agent response
       tui.addMessage('assistant', 'I\'ll run an OPTIONS test');
-      
+
       // Tool execution stream
       tui.streamMessage('\n[Tool] Executing sip_test...');
       tui.streamMessage('\n  [INFO] Starting SIP OPTIONS test');
       tui.streamMessage('\n  [INFO] Resolved: example.com:5060');
       tui.streamMessage('\n  [SIP] Sending OPTIONS request');
       tui.streamMessage('\n[Tool] Complete\n');
-      
+
       // Final response
       tui.addMessage('assistant', 'Test completed');
 
-      const fullOutput = output.join('');
+      const fullOutput = terminal.getFullOutput();
       expect(fullOutput).toContain('Test sip:example.com');
       expect(fullOutput).toContain('OPTIONS test');
       expect(fullOutput).toContain('Sending OPTIONS request');
@@ -90,41 +84,41 @@ describe('End-to-End Flow Tests', () => {
     });
 
     it('handles INVITE test flow', () => {
-      const tui = new PinmoliTUI();
+      const tui = new PinmoliTUI(terminal);
       tui.start();
 
       tui.addMessage('user', 'Test INVITE to sip:user@server.com with opus codec');
       tui.addMessage('assistant', 'Running INVITE test with opus');
-      
+
       tui.streamMessage('\n[Tool] Executing sip_test...');
       tui.streamMessage('\n  [INFO] Starting SIP INVITE test');
       tui.streamMessage('\n  [SIP] Sending INVITE with SDP');
       tui.streamMessage('\n  [SIP] Codecs: opus');
       tui.streamMessage('\n[Tool] Complete\n');
-      
+
       tui.addMessage('assistant', 'INVITE test completed');
 
-      const fullOutput = output.join('');
+      const fullOutput = terminal.getFullOutput();
       expect(fullOutput).toContain('INVITE');
       expect(fullOutput).toContain('opus');
       expect(fullOutput).toContain('SDP');
     });
 
     it('handles REGISTER test flow', () => {
-      const tui = new PinmoliTUI();
+      const tui = new PinmoliTUI(terminal);
       tui.start();
 
       tui.addMessage('user', 'Register to sip:registrar.com');
       tui.addMessage('assistant', 'Running REGISTER test');
-      
+
       tui.streamMessage('\n[Tool] Executing sip_test...');
       tui.streamMessage('\n  [INFO] Starting SIP REGISTER test');
       tui.streamMessage('\n  [SIP] Sending REGISTER');
       tui.streamMessage('\n[Tool] Complete\n');
-      
+
       tui.addMessage('assistant', 'Registration test completed');
 
-      const fullOutput = output.join('');
+      const fullOutput = terminal.getFullOutput();
       expect(fullOutput).toContain('REGISTER');
       expect(fullOutput).toContain('registrar.com');
     });
@@ -132,37 +126,37 @@ describe('End-to-End Flow Tests', () => {
 
   describe('Error Handling Flow', () => {
     it('handles timeout errors gracefully', () => {
-      const tui = new PinmoliTUI();
+      const tui = new PinmoliTUI(terminal);
       tui.start();
 
       tui.addMessage('user', 'Test sip:unreachable.com');
       tui.addMessage('assistant', 'Running test');
-      
+
       tui.streamMessage('\n[Tool] Executing sip_test...');
       tui.streamMessage('\n  [INFO] Starting test');
       tui.streamMessage('\n  [ERROR] Request timeout after 5000ms');
       tui.streamMessage('\n[Tool] Complete\n');
-      
+
       tui.addMessage('assistant', 'Test failed due to timeout. The server may be unreachable.');
 
-      const fullOutput = output.join('');
+      const fullOutput = terminal.getFullOutput();
       expect(fullOutput).toContain('timeout');
       expect(fullOutput).toContain('unreachable');
     });
 
     it('handles invalid URI errors', () => {
-      const tui = new PinmoliTUI();
+      const tui = new PinmoliTUI(terminal);
       tui.start();
 
       tui.addMessage('user', 'Test invalid-uri');
       tui.addMessage('assistant', 'I notice the URI format is invalid');
-      
-      const fullOutput = output.join('');
+
+      const fullOutput = terminal.getFullOutput();
       expect(fullOutput).toContain('invalid');
     });
 
     it('handles DNS resolution errors', () => {
-      const tui = new PinmoliTUI();
+      const tui = new PinmoliTUI(terminal);
       tui.start();
 
       tui.addMessage('user', 'Test sip:nonexistent.invalid');
@@ -171,7 +165,7 @@ describe('End-to-End Flow Tests', () => {
       tui.streamMessage('\n[Tool] Complete\n');
       tui.addMessage('assistant', 'Could not resolve hostname');
 
-      const fullOutput = output.join('');
+      const fullOutput = terminal.getFullOutput();
       expect(fullOutput).toContain('DNS resolution failed');
       expect(fullOutput).toContain('Could not resolve');
     });
@@ -179,7 +173,7 @@ describe('End-to-End Flow Tests', () => {
 
   describe('Multi-Step Flow', () => {
     it('handles test, analyze, save workflow', () => {
-      const tui = new PinmoliTUI();
+      const tui = new PinmoliTUI(terminal);
       tui.start();
 
       // Step 1: Run test
@@ -202,7 +196,7 @@ describe('End-to-End Flow Tests', () => {
       tui.streamMessage('\n[Tool] Complete\n');
       tui.addMessage('assistant', 'Test saved successfully');
 
-      const fullOutput = output.join('');
+      const fullOutput = terminal.getFullOutput();
       expect(fullOutput).toContain('Test sip:server.com');
       expect(fullOutput).toContain('Analyze the failure');
       expect(fullOutput).toContain('503 Service Unavailable');
@@ -211,7 +205,7 @@ describe('End-to-End Flow Tests', () => {
     });
 
     it('handles load and re-run workflow', () => {
-      const tui = new PinmoliTUI();
+      const tui = new PinmoliTUI(terminal);
       tui.start();
 
       // Load saved test
@@ -227,14 +221,14 @@ describe('End-to-End Flow Tests', () => {
       tui.streamMessage('\n[Tool] Complete\n');
       tui.addMessage('assistant', 'Test completed');
 
-      const fullOutput = output.join('');
+      const fullOutput = terminal.getFullOutput();
       expect(fullOutput).toContain('Load test');
       expect(fullOutput).toContain('Loaded test configuration');
       expect(fullOutput).toContain('Run it again');
     });
 
     it('handles list and select workflow', () => {
-      const tui = new PinmoliTUI();
+      const tui = new PinmoliTUI(terminal);
       tui.start();
 
       tui.addMessage('user', 'Show me all saved tests');
@@ -247,7 +241,7 @@ describe('End-to-End Flow Tests', () => {
       tui.streamMessage('\n[Tool] Complete\n');
       tui.addMessage('assistant', 'Loaded test2');
 
-      const fullOutput = output.join('');
+      const fullOutput = terminal.getFullOutput();
       expect(fullOutput).toContain('Show me all saved tests');
       expect(fullOutput).toContain('Found 3 saved tests');
       expect(fullOutput).toContain('Load test2');
@@ -256,12 +250,12 @@ describe('End-to-End Flow Tests', () => {
 
   describe('Real-time Streaming Flow', () => {
     it('shows progressive updates during long test', () => {
-      const tui = new PinmoliTUI();
+      const tui = new PinmoliTUI(terminal);
       tui.start();
 
       tui.addMessage('user', 'Test sip:server.com');
       tui.streamMessage('\n[Tool] Executing sip_test...');
-      
+
       // Simulate progressive updates
       tui.streamMessage('\n  [INFO] Starting test');
       tui.streamMessage('\n  [INFO] Resolved: 192.168.1.1:5060');
@@ -270,10 +264,10 @@ describe('End-to-End Flow Tests', () => {
       tui.streamMessage('\n  [SIP] Waiting for response');
       tui.streamMessage('\n  [SIP] Received 200 OK');
       tui.streamMessage('\n[Tool] Complete\n');
-      
+
       tui.addMessage('assistant', 'Test successful');
 
-      const fullOutput = output.join('');
+      const fullOutput = terminal.getFullOutput();
       expect(fullOutput).toContain('Starting test');
       expect(fullOutput).toContain('Resolved');
       expect(fullOutput).toContain('UDP socket created');

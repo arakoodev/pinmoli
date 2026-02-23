@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { executeSipTest } from '../../src/sip/transport.js';
+import { runSipTest } from '../../src/sip/engine.js';
 
 describe('Generic SIP Integration', () => {
   it('handles invalid endpoint gracefully', async () => {
@@ -14,7 +14,7 @@ describe('Generic SIP Integration', () => {
 
     const events = [];
     try {
-      for await (const event of executeSipTest(config)) {
+      for await (const event of runSipTest(config)) {
         events.push(event);
         if (events.length > 10) break;
       }
@@ -37,7 +37,7 @@ describe('Generic SIP Integration', () => {
 
     const events = [];
     try {
-      for await (const event of executeSipTest(config)) {
+      for await (const event of runSipTest(config)) {
         events.push(event);
         if (events.length > 5) break;
       }
@@ -65,7 +65,7 @@ describe('Generic SIP Integration', () => {
     const events = [];
     
     try {
-      for await (const event of executeSipTest(config)) {
+      for await (const event of runSipTest(config)) {
         events.push(event);
       }
     } catch (error) {

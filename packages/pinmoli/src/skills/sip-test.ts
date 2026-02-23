@@ -1,5 +1,5 @@
 import type { TestConfig, SipEvent } from '../validation/schemas.js';
-import { executeSipTest } from '../sip/transport.js';
+import { runSipTest } from '../sip/engine.js';
 
 /**
  * Execute a SIP test with the given configuration.
@@ -8,8 +8,11 @@ import { executeSipTest } from '../sip/transport.js';
 export async function* sipTestHandler(config: TestConfig): AsyncGenerator<SipEvent> {
   // Validate at skill boundary
   const { TestConfigSchema } = await import('../validation/schemas.js');
-  TestConfigSchema.parse(config);
+  const { Value } = await import('@sinclair/typebox/value');
+  if (!Value.Check(TestConfigSchema, config)) {
+    throw new Error('Invalid test configuration');
+  }
 
-  yield* executeSipTest(config);
+  yield* runSipTest(config);
 }
 

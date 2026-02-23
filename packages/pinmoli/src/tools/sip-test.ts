@@ -10,7 +10,14 @@ import { runSipTest } from '../sip/engine.js';
 export const sipTestTool: AgentTool = {
   name: 'sip_test',
   label: 'SIP Test',
-  description: 'Execute a SIP test (OPTIONS, INVITE, or REGISTER)',
+  description: `Execute a SIP test (OPTIONS, INVITE, or REGISTER).
+
+IMPORTANT: Before calling this tool, confirm with the user:
+1. URI: For LiveKit (*.sip.livekit.cloud), URI must contain a phone number (sip:+1XXXXXXXXXX@host). Bare host gives 404.
+2. INVITE: Confirm audio sample, sendDelay (recommend 8 for voice agents that speak first), responseWaitTime.
+3. REGISTER: Ask about auth credentials.
+
+Skip confirmation only if the user explicitly provided all parameters or said "use defaults".`,
   parameters: TestConfigSchema,
   
   async execute(toolCallId, params, signal, onUpdate) {

@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { PinmoliTUI } from '../../src/ui/tui.js';
+import { TestTerminal } from '../../src/ui/test-terminal.js';
 
 /**
  * Tests for bidirectional conversation flow with voice agents
@@ -7,24 +8,17 @@ import { PinmoliTUI } from '../../src/ui/tui.js';
 
 describe('Bidirectional Agent Conversation', () => {
   let tui: PinmoliTUI;
-  let output: string[];
+  let terminal: TestTerminal;
 
   beforeEach(() => {
-    output = [];
-    vi.spyOn(console, 'log').mockImplementation((...args) => {
-      output.push(args.join(' '));
-    });
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
-      output.push(chunk.toString());
-      return true;
-    });
-    tui = new PinmoliTUI();
+    terminal = new TestTerminal();
+    tui = new PinmoliTUI(terminal);
   });
 
   it('waits for agent response after sending audio', () => {
     tui.start();
     tui.addMessage('user', 'Test sip:agent@livekit.cloud');
-    
+
     tui.streamMessage('\n[Tool] Executing sip_test...');
     tui.streamMessage('\n  [SIP] Received 200 OK');
     tui.streamMessage('\n  [SIP] Sending ACK');
@@ -36,7 +30,7 @@ describe('Bidirectional Agent Conversation', () => {
     tui.streamMessage('\n  [SIP] Call terminated');
     tui.streamMessage('\n[Tool] Complete\n');
 
-    const fullOutput = output.join('');
+    const fullOutput = terminal.getFullOutput();
     expect(fullOutput).toContain('Streaming audio');
     expect(fullOutput).toContain('Waiting for agent response');
     expect(fullOutput).toContain('Agent response window complete');
@@ -47,7 +41,7 @@ describe('Bidirectional Agent Conversation', () => {
     tui.start();
     tui.addMessage('user', 'Have a conversation with the LiveKit agent');
     tui.addMessage('assistant', 'I\'ll call the agent and wait for their response');
-    
+
     tui.streamMessage('\n[Tool] Executing sip_test...');
     tui.streamMessage('\n  [INFO] Starting SIP INVITE test');
     tui.streamMessage('\n  [SIP] Received 100 Processing');
@@ -62,10 +56,10 @@ describe('Bidirectional Agent Conversation', () => {
     tui.streamMessage('\n  [SIP] Sending BYE');
     tui.streamMessage('\n  [SIP] Call terminated');
     tui.streamMessage('\n[Tool] Complete\n');
-    
+
     tui.addMessage('assistant', 'Conversation complete. The agent had 10 seconds to respond.');
 
-    const fullOutput = output.join('');
+    const fullOutput = terminal.getFullOutput();
     expect(fullOutput).toContain('INVITE');
     expect(fullOutput).toContain('Ringing');
     expect(fullOutput).toContain('ACK');
@@ -79,21 +73,21 @@ describe('Bidirectional Agent Conversation', () => {
     tui.start();
     tui.addMessage('user', 'Why does the call take so long?');
     tui.addMessage('assistant', 'After sending our audio, we wait 10 seconds for the agent to respond. This allows bidirectional conversation.');
-    
-    const fullOutput = output.join('');
+
+    const fullOutput = terminal.getFullOutput();
     expect(fullOutput).toContain('10 seconds');
     expect(fullOutput).toContain('bidirectional');
   });
 
   it('handles custom speech with agent response', () => {
     tui.start();
-    
+
     // Generate custom speech
     tui.addMessage('user', 'Generate speech: "What is the weather today?"');
     tui.streamMessage('\n[Tool] Executing generate_audio...');
     tui.streamMessage('\n  ✓ Generated weather-question.wav');
     tui.streamMessage('\n[Tool] Complete\n');
-    
+
     // Test with agent
     tui.addMessage('user', 'Ask the agent that question');
     tui.streamMessage('\n[Tool] Executing sip_test...');
@@ -105,10 +99,10 @@ describe('Bidirectional Agent Conversation', () => {
     tui.streamMessage('\n  [INFO] Agent response window complete');
     tui.streamMessage('\n  [SIP] Sending BYE');
     tui.streamMessage('\n[Tool] Complete\n');
-    
+
     tui.addMessage('assistant', 'Question sent. The agent had time to respond.');
 
-    const fullOutput = output.join('');
+    const fullOutput = terminal.getFullOutput();
     expect(fullOutput).toContain('weather-question');
     expect(fullOutput).toContain('Waiting for agent response');
     expect(fullOutput).toContain('agent had time to respond');
@@ -116,10 +110,10 @@ describe('Bidirectional Agent Conversation', () => {
 
   it('allows custom response wait time', () => {
     tui.start();
-    
+
     tui.addMessage('user', 'Test the agent but wait 20 seconds for response');
     tui.addMessage('assistant', 'I\'ll set responseWaitTime to 20 seconds');
-    
+
     tui.streamMessage('\n[Tool] Executing sip_test...');
     tui.streamMessage('\n  [SIP] Received 200 OK');
     tui.streamMessage('\n  [SIP] Sending ACK');
@@ -130,22 +124,22 @@ describe('Bidirectional Agent Conversation', () => {
     tui.streamMessage('\n  [SIP] Sending BYE');
     tui.streamMessage('\n[Tool] Complete\n');
 
-    const fullOutput = output.join('');
+    const fullOutput = terminal.getFullOutput();
     expect(fullOutput).toContain('20 seconds');
     expect(fullOutput).toContain('(20s)');
   });
 
   it('allows short response wait time', () => {
     tui.start();
-    
+
     tui.addMessage('user', 'Quick test with 3 second wait');
-    
+
     tui.streamMessage('\n[Tool] Executing sip_test...');
     tui.streamMessage('\n  [INFO] Waiting for agent response (3s)...');
     tui.streamMessage('\n  [INFO] Agent response window complete');
     tui.streamMessage('\n[Tool] Complete\n');
 
-    const fullOutput = output.join('');
+    const fullOutput = terminal.getFullOutput();
     expect(fullOutput).toContain('(3s)');
   });
 });

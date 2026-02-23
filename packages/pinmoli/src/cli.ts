@@ -38,35 +38,49 @@ async function main() {
   }
 
   console.log('Initializing agent...');
-  
+
+  let tui: PinmoliTUI | undefined;
   try {
-    const tui = new PinmoliTUI();
+    tui = new PinmoliTUI();
     const agent = new PinmoliAgent(config, tui);
 
     console.log('✓ Ready\n');
-    
+
     tui.start();
 
-    // Simple REPL loop
+    // Wire Ctrl+C / Escape interrupt to agent abort
+    tui.onInterrupt = () => agent.abort();
+
+    // REPL loop
     while (true) {
       const input = await tui.getUserInput();
-      
+
       if (!input) continue;
       if (input === 'exit' || input === 'quit') break;
 
       tui.addMessage('user', input);
+      tui.setAgentBusy(true);
 
       try {
         const response = await agent.chat(input);
-        tui.addMessage('assistant', response);
+        if (response) {
+          tui.addMessage('assistant', response);
+        }
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        tui.addMessage('assistant', `Error: ${errorMsg}`);
+        // Don't show abort as an error — it's expected user action
+        if (!errorMsg.includes('aborted')) {
+          tui.addMessage('assistant', `Error: ${errorMsg}`);
+        }
+      } finally {
+        tui.setAgentBusy(false);
       }
     }
 
+    tui.stop();
     console.log('\nGoodbye!');
   } catch (error) {
+    tui?.stop();
     console.error('Failed to initialize:', error);
     process.exit(1);
   }

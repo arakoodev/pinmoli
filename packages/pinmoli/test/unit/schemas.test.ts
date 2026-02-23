@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
-import { TestConfigSchema, SipEventSchema, type TestConfig, type SipEvent } from '../src/validation/schemas.js';
+import { TestConfigSchema, SipEventSchema, type TestConfig, type SipEvent } from '../../src/validation/schemas.js';
 
 describe('TypeBox Schemas', () => {
   describe('TestConfigSchema', () => {
@@ -30,6 +30,62 @@ describe('TypeBox Schemas', () => {
 
       const result = Value.Check(TestConfigSchema, invalidConfig);
       expect(result).toBe(false);
+    });
+
+    it('accepts config with sendDelay', () => {
+      const config = {
+        uri: 'sip:test@example.com',
+        method: 'INVITE',
+        codecs: ['opus', 'PCMU'],
+        transport: 'udp',
+        mediaPort: 10000,
+        timeout: 5000,
+        sendDelay: 8,
+        responseWaitTime: 15
+      };
+
+      expect(Value.Check(TestConfigSchema, config)).toBe(true);
+    });
+
+    it('accepts config without sendDelay (defaults to 0)', () => {
+      const config = {
+        uri: 'sip:test@example.com',
+        method: 'INVITE',
+        codecs: ['opus'],
+        transport: 'udp',
+        mediaPort: 10000,
+        timeout: 5000
+      };
+
+      expect(Value.Check(TestConfigSchema, config)).toBe(true);
+    });
+
+    it('rejects sendDelay greater than 60', () => {
+      const config = {
+        uri: 'sip:test@example.com',
+        method: 'INVITE',
+        codecs: ['opus'],
+        transport: 'udp',
+        mediaPort: 10000,
+        timeout: 5000,
+        sendDelay: 61
+      };
+
+      expect(Value.Check(TestConfigSchema, config)).toBe(false);
+    });
+
+    it('rejects negative sendDelay', () => {
+      const config = {
+        uri: 'sip:test@example.com',
+        method: 'INVITE',
+        codecs: ['opus'],
+        transport: 'udp',
+        mediaPort: 10000,
+        timeout: 5000,
+        sendDelay: -1
+      };
+
+      expect(Value.Check(TestConfigSchema, config)).toBe(false);
     });
 
     it('rejects empty codecs array', () => {

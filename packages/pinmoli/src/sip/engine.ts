@@ -6,8 +6,8 @@
 import dgram from 'dgram';
 import { generateCallId, generateTag } from './protocol.js';
 import { buildSdp } from './sdp.js';
-import { streamAudioFile, streamGeneratedAudio, type AudioSample } from './audio.js';
-import { receiveRTPAudio, saveAsWAV } from './rtp-receiver.js';
+import { getAudioSamplePath } from './audio.js';
+import { receiveRTPAudio, saveAsWAV, sendRTPFromSocket, loadAudioSample } from './rtp-receiver.js';
 import type { TestConfig, SipEvent } from '../validation/schemas.js';
 import { resolve } from 'path';
 
@@ -55,20 +55,48 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
     // Create separate sockets for SIP signaling and RTP media
     const sipSocket = dgram.createSocket('udp4');
     const rtpSocket = dgram.createSocket('udp4');
+
+    // Get local IP for SDP and SIP headers
+    const { networkInterfaces } = await import('os');
+    const nets = networkInterfaces();
+    let localIp = '0.0.0.0';
     
-    // Bind RTP socket to media port
+    // Find first non-internal IPv4 address
+    for (const name of Object.keys(nets)) {
+      for (const net of nets[name] || []) {
+        if (net.family === 'IPv4' && !net.internal) {
+          localIp = net.address;
+          break;
+        }
+      }
+      if (localIp !== '0.0.0.0') break;
+    }
+
+    // Bind SIP socket
+    await new Promise<void>((resolve, reject) => {
+      sipSocket.once('error', reject);
+      sipSocket.bind(0, () => {
+        sipSocket.removeListener('error', reject);
+        resolve();
+      });
+    });
+    const sipPort = sipSocket.address().port;
+    
+    // Bind RTP socket to media port (use 0 if 10000 to avoid conflicts)
+    const targetRtpPort = config.mediaPort === 10000 ? 0 : config.mediaPort;
     await new Promise<void>((resolve, reject) => {
       rtpSocket.once('error', reject);
-      rtpSocket.bind(config.mediaPort, () => {
+      rtpSocket.bind(targetRtpPort, () => {
         rtpSocket.removeListener('error', reject);
         resolve();
       });
     });
+    const rtpPort = rtpSocket.address().port;
     
     yield {
       type: 'info',
       timestamp: Date.now(),
-      message: `RTP socket bound to port ${config.mediaPort}`
+      message: `SIP socket bound to ${localIp}:${sipPort}, RTP socket bound to port ${rtpPort}`
     };
 
     // Build SIP request
@@ -77,46 +105,41 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
     const branch = `z9hG4bK${generateTag()}`;
 
     let sipMessage = '';
+    let sdp = '';
     
     if (config.method === 'OPTIONS') {
-      sipMessage = buildOptionsRequest(config.uri, host, port, callId, fromTag, branch);
+      sipMessage = buildOptionsRequest(config.uri, host, port, callId, fromTag, branch, localIp, sipPort);
     } else if (config.method === 'INVITE') {
-      // Get local IP for SDP
-      const { networkInterfaces } = await import('os');
-      const nets = networkInterfaces();
-      let localIp = '0.0.0.0';
-      
-      // Find first non-internal IPv4 address
-      for (const name of Object.keys(nets)) {
-        for (const net of nets[name] || []) {
-          if (net.family === 'IPv4' && !net.internal) {
-            localIp = net.address;
-            break;
-          }
-        }
-        if (localIp !== '0.0.0.0') break;
-      }
-      
-      const sdp = generateSdp(config.codecs, config.mediaPort, localIp);
-      sipMessage = buildInviteRequest(config.uri, host, port, callId, fromTag, branch, sdp);
+      sdp = generateSdp(config.codecs, rtpPort, localIp);
+      sipMessage = buildInviteRequest(config.uri, host, port, callId, fromTag, branch, sdp, localIp, sipPort);
     } else if (config.method === 'REGISTER') {
-      sipMessage = buildRegisterRequest(config.uri, host, port, callId, fromTag, branch);
+      sipMessage = buildRegisterRequest(config.uri, host, port, callId, fromTag, branch, localIp, sipPort);
     }
 
     yield {
       type: 'sip',
       timestamp: Date.now(),
       message: `Sending ${config.method} request...`,
-      method: config.method
+      method: config.method,
+      ...(config.method === 'INVITE' && { sdpOffer: sdp })
     };
 
     // Send request
     const startTime = Date.now();
     const responses: Array<{ statusCode: number; statusText: string; response: string }> = [];
     
+    let socketClosed = false;
+    const safeClose = () => {
+      if (!socketClosed) {
+        socketClosed = true;
+        try { sipSocket.close(); } catch (_e) { /* already closed */ }
+        try { rtpSocket.close(); } catch (_e) { /* already closed */ }
+      }
+    };
+    
     await new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        sipSocket.close();
+        safeClose();
         if (responses.length === 0) {
           reject(new Error('Request timeout'));
         } else {
@@ -141,7 +164,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           // Close on final response (2xx, 3xx, 4xx, 5xx, 6xx) - but NOT for INVITE
           if (statusCode >= 200 && config.method !== 'INVITE') {
             clearTimeout(timeoutId);
-            sipSocket.close();
+            safeClose();
             resolve();
           } else if (statusCode >= 200 && config.method === 'INVITE') {
             // For INVITE, keep socket open for ACK/BYE
@@ -154,14 +177,14 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
 
       sipSocket.on('error', (err) => {
         clearTimeout(timeoutId);
-        sipSocket.close();
+        safeClose();
         reject(err);
       });
 
       sipSocket.send(sipMessage, port, host, (err) => {
         if (err) {
           clearTimeout(timeoutId);
-          sipSocket.close();
+          safeClose();
           reject(err);
         }
       });
@@ -203,7 +226,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         }
 
         // Send ACK
-        const ackMessage = buildAckRequest(config.uri, host, port, callId, fromTag, branch);
+        const ackMessage = buildAckRequest(config.uri, host, port, callId, fromTag, branch, localIp, sipPort);
         yield {
           type: 'sip',
           timestamp: Date.now(),
@@ -214,58 +237,89 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           sipSocket.send(ackMessage, port, host, () => resolve());
         });
 
-        // Send audio with ffmpeg
-        yield {
-          type: 'info',
-          timestamp: Date.now(),
-          message: `Streaming audio to ${remoteIp}:${remotePort}`
-        };
-
-        // Use specified audio sample or default to voice-hello (speech)
+        // Resolve audio sample
         const sample = config.audioSample || 'voice-hello';
-        let audioSent = await streamAudioFile(sample, remoteIp, remotePort);
-        
-        if (!audioSent) {
-          // Fallback to generated audio
-          audioSent = await streamGeneratedAudio('sine', remoteIp, remotePort, {
-            frequency: 440,
-            duration: 3
-          });
-        }
-        
-        if (audioSent) {
+        const samplePath = getAudioSamplePath(sample);
+        const pcmuData = samplePath ? loadAudioSample(samplePath) : null;
+
+        const sendDelay = config.sendDelay ?? 0;
+        const waitTime = config.responseWaitTime ?? 10;
+
+        // ---- Phase 1: Listen for agent greeting (if sendDelay > 0) ----
+        if (sendDelay > 0) {
+          const greetingFile = resolve(process.cwd(), 'audio-samples', `agent-greeting-${Date.now()}.wav`);
+
           yield {
             type: 'info',
             timestamp: Date.now(),
-            message: `Audio stream complete (${sample})`
+            message: `Listening for agent greeting on port ${rtpPort} (${sendDelay}s)...`
+          };
+
+          const greetingResult = await receiveRTPAudio(rtpSocket, sendDelay);
+
+          if (greetingResult.packetsReceived > 0) {
+            saveAsWAV(greetingResult.audioData, greetingFile);
+
+            yield {
+              type: 'info',
+              timestamp: Date.now(),
+              message: `Received ${greetingResult.packetsReceived} greeting RTP packets from agent`
+            };
+
+            yield {
+              type: 'info',
+              timestamp: Date.now(),
+              message: `Agent greeting saved to: ${greetingFile}`
+            };
+          } else {
+            yield {
+              type: 'info',
+              timestamp: Date.now(),
+              message: `No greeting audio received (${sendDelay}s timeout)`
+            };
+          }
+        }
+
+        // ---- Phase 2: Send audio + listen for reply ----
+        const responseFile = resolve(process.cwd(), 'audio-samples', `agent-response-${Date.now()}.wav`);
+
+        yield {
+          type: 'info',
+          timestamp: Date.now(),
+          message: `Listening for agent response on port ${rtpPort} (${waitTime}s)...`
+        };
+
+        const rtpPromise = receiveRTPAudio(rtpSocket, waitTime);
+
+        // Send audio from the SAME socket (fixes port mismatch bug)
+        if (pcmuData) {
+          yield {
+            type: 'info',
+            timestamp: Date.now(),
+            message: `Sending audio (${sample}) to ${remoteIp}:${remotePort} from port ${rtpPort}`
+          };
+
+          const { packetsSent } = await sendRTPFromSocket(rtpSocket, pcmuData, remoteIp, remotePort);
+
+          yield {
+            type: 'info',
+            timestamp: Date.now(),
+            message: `Sent ${packetsSent} RTP packets`
           };
         } else {
           yield {
             type: 'info',
             timestamp: Date.now(),
-            message: 'ffmpeg not available - skipping audio'
+            message: `Audio sample not found: ${sample} — skipping send`
           };
         }
 
-        // Wait for agent response (receive incoming audio)
-        const waitTime = config.responseWaitTime ?? 10;
-        yield {
-          type: 'info',
-          timestamp: Date.now(),
-          message: `Listening for agent response (${waitTime}s)...`
-        };
-
-        // Start RTP receiver on RTP socket
-        const outputFile = resolve(process.cwd(), 'audio-samples', `agent-response-${Date.now()}.wav`);
-        const rtpPromise = receiveRTPAudio(rtpSocket, waitTime);
-
-        // Wait for reception to complete
+        // Wait for receiver to finish (agent responds after we stop sending)
         const { packetsReceived, audioData } = await rtpPromise;
 
         if (packetsReceived > 0) {
-          // Save as WAV file
-          saveAsWAV(audioData, outputFile);
-          
+          saveAsWAV(audioData, responseFile);
+
           yield {
             type: 'info',
             timestamp: Date.now(),
@@ -275,7 +329,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           yield {
             type: 'info',
             timestamp: Date.now(),
-            message: `Agent response saved to: ${outputFile}`
+            message: `Agent response saved to: ${responseFile}`
           };
         } else {
           yield {
@@ -285,14 +339,17 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           };
         }
 
+        const totalTime = sendDelay + waitTime;
         yield {
           type: 'info',
           timestamp: Date.now(),
-          message: `Call was active for ${waitTime}s`
+          message: sendDelay > 0
+            ? `Call was active for ${totalTime}s (${sendDelay}s greeting + ${waitTime}s response)`
+            : `Call was active for ${waitTime}s`
         };
 
         // Send BYE to hang up
-        const byeMessage = buildByeRequest(config.uri, host, port, callId, fromTag, branch);
+        const byeMessage = buildByeRequest(config.uri, host, port, callId, fromTag, branch, localIp, sipPort);
         yield {
           type: 'sip',
           timestamp: Date.now(),
@@ -312,7 +369,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           });
         });
 
-        sipSocket.close();
+        safeClose();
 
         yield {
           type: 'sip',
@@ -355,15 +412,15 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
   }
 }
 
-function buildOptionsRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string): string {
+function buildOptionsRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string, localIp: string, localPort: number): string {
   return [
     `OPTIONS ${uri} SIP/2.0`,
-    `Via: SIP/2.0/UDP 0.0.0.0:5060;branch=${branch}`,
+    `Via: SIP/2.0/UDP ${localIp}:${localPort};branch=${branch}`,
     `From: <sip:pinmoli@pinmoli.local>;tag=${fromTag}`,
     `To: <${uri}>`,
     `Call-ID: ${callId}`,
     `CSeq: 1 OPTIONS`,
-    `Contact: <sip:pinmoli@0.0.0.0:5060>`,
+    `Contact: <sip:pinmoli@${localIp}:${localPort}>`,
     `Max-Forwards: 70`,
     `User-Agent: Pinmoli/0.1.0`,
     `Content-Length: 0`,
@@ -372,15 +429,15 @@ function buildOptionsRequest(uri: string, host: string, port: number, callId: st
   ].join('\r\n');
 }
 
-function buildInviteRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string, sdp: string): string {
+function buildInviteRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string, sdp: string, localIp: string, localPort: number): string {
   return [
     `INVITE ${uri} SIP/2.0`,
-    `Via: SIP/2.0/UDP 0.0.0.0:5060;branch=${branch}`,
+    `Via: SIP/2.0/UDP ${localIp}:${localPort};branch=${branch}`,
     `From: <sip:pinmoli@pinmoli.local>;tag=${fromTag}`,
     `To: <${uri}>`,
     `Call-ID: ${callId}`,
     `CSeq: 1 INVITE`,
-    `Contact: <sip:pinmoli@0.0.0.0:5060>`,
+    `Contact: <sip:pinmoli@${localIp}:${localPort}>`,
     `Max-Forwards: 70`,
     `User-Agent: Pinmoli/0.1.0`,
     `Content-Type: application/sdp`,
@@ -390,10 +447,10 @@ function buildInviteRequest(uri: string, host: string, port: number, callId: str
   ].join('\r\n');
 }
 
-function buildAckRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string): string {
+function buildAckRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string, localIp: string, localPort: number): string {
   return [
     `ACK ${uri} SIP/2.0`,
-    `Via: SIP/2.0/UDP 0.0.0.0:5060;branch=${branch}`,
+    `Via: SIP/2.0/UDP ${localIp}:${localPort};branch=${branch}`,
     `From: <sip:pinmoli@pinmoli.local>;tag=${fromTag}`,
     `To: <${uri}>`,
     `Call-ID: ${callId}`,
@@ -406,10 +463,10 @@ function buildAckRequest(uri: string, host: string, port: number, callId: string
   ].join('\r\n');
 }
 
-function buildByeRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string): string {
+function buildByeRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string, localIp: string, localPort: number): string {
   return [
     `BYE ${uri} SIP/2.0`,
-    `Via: SIP/2.0/UDP 0.0.0.0:5060;branch=${branch}`,
+    `Via: SIP/2.0/UDP ${localIp}:${localPort};branch=${branch}`,
     `From: <sip:pinmoli@pinmoli.local>;tag=${fromTag}`,
     `To: <${uri}>`,
     `Call-ID: ${callId}`,
@@ -422,15 +479,15 @@ function buildByeRequest(uri: string, host: string, port: number, callId: string
   ].join('\r\n');
 }
 
-function buildRegisterRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string): string {
+function buildRegisterRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string, localIp: string, localPort: number): string {
   return [
     `REGISTER ${uri} SIP/2.0`,
-    `Via: SIP/2.0/UDP 0.0.0.0:5060;branch=${branch}`,
+    `Via: SIP/2.0/UDP ${localIp}:${localPort};branch=${branch}`,
     `From: <${uri}>;tag=${fromTag}`,
     `To: <${uri}>`,
     `Call-ID: ${callId}`,
     `CSeq: 1 REGISTER`,
-    `Contact: <sip:pinmoli@0.0.0.0:5060>`,
+    `Contact: <sip:pinmoli@${localIp}:${localPort}>`,
     `Max-Forwards: 70`,
     `User-Agent: Pinmoli/0.1.0`,
     `Expires: 3600`,

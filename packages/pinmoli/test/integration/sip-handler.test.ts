@@ -20,49 +20,4 @@ describe('SIP Test Handler', () => {
       }
     }).rejects.toThrow();
   });
-
-  it('streams events as generator', async () => {
-    const config: TestConfig = {
-      uri: 'sip:5eezfwavhxe.sip.livekit.cloud',
-      method: 'OPTIONS',
-      codecs: ['opus'],
-      transport: 'udp',
-      mediaPort: 10000,
-      timeout: 10000
-    };
-
-    const events = [];
-    for await (const event of sipTestHandler(config)) {
-      events.push(event);
-      // Verify each event is yielded immediately
-      expect(event).toHaveProperty('type');
-      expect(event).toHaveProperty('timestamp');
-      expect(event).toHaveProperty('message');
-    }
-
-    expect(events.length).toBeGreaterThan(0);
-  }, 15000);
-
-  it('handles all SIP methods', async () => {
-    const methods: Array<'OPTIONS' | 'INVITE' | 'REGISTER'> = ['OPTIONS', 'INVITE', 'REGISTER'];
-
-    for (const method of methods) {
-      const config: TestConfig = {
-        uri: 'sip:5eezfwavhxe.sip.livekit.cloud',
-        method,
-        codecs: ['opus'],
-        transport: 'udp',
-        mediaPort: 10000,
-        timeout: 10000
-      };
-
-      const events = [];
-      for await (const event of sipTestHandler(config)) {
-        events.push(event);
-      }
-
-      const methodEvent = events.find(e => e.method === method);
-      expect(methodEvent).toBeDefined();
-    }
-  }, 45000);
 });

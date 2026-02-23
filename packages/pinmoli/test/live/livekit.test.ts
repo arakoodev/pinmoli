@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { PinmoliTUI } from '../../src/ui/tui.js';
+import { TestTerminal } from '../../src/ui/test-terminal.js';
 import { runSipTest } from '../../src/sip/engine.js';
 import type { TestConfig } from '../../src/validation/schemas.js';
 import * as dotenv from 'dotenv';
@@ -17,18 +18,11 @@ const LIVEKIT_ENDPOINT = process.env.LIVEKIT_ENDPOINT || 'sip:5eezfwavhxe.sip.li
 
 describe('LiveKit SIP Integration', () => {
   let tui: PinmoliTUI;
-  let output: string[];
+  let terminal: TestTerminal;
 
   beforeEach(() => {
-    output = [];
-    vi.spyOn(console, 'log').mockImplementation((...args) => {
-      output.push(args.join(' '));
-    });
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
-      output.push(chunk.toString());
-      return true;
-    });
-    tui = new PinmoliTUI();
+    terminal = new TestTerminal();
+    tui = new PinmoliTUI(terminal);
   });
 
   describe('OPTIONS Test Flow', () => {
@@ -46,28 +40,28 @@ describe('LiveKit SIP Integration', () => {
       };
 
       tui.streamMessage('\n[Tool] Executing sip_test...');
-      
+
       const events = [];
       for await (const event of runSipTest(config)) {
         events.push(event);
         tui.streamMessage(`\n  [${event.type.toUpperCase()}] ${event.message}`);
-        
+
         if (event.status) {
           tui.streamMessage(` (${event.status})`);
         }
       }
-      
+
       tui.streamMessage('\n[Tool] Complete\n');
 
       // Verify we got events
       expect(events.length).toBeGreaterThan(0);
       expect(events[0].type).toBe('info');
-      
+
       // Check output
-      const fullOutput = output.join('');
+      const fullOutput = terminal.getFullOutput();
       expect(fullOutput).toContain('livekit.cloud');
       expect(fullOutput).toContain('OPTIONS');
-      
+
       // Should have either success or error
       const hasResult = events.some(e => e.type === 'sip' || e.type === 'error');
       expect(hasResult).toBe(true);
@@ -87,19 +81,19 @@ describe('LiveKit SIP Integration', () => {
       };
 
       tui.streamMessage('\n[Tool] Executing sip_test...');
-      
+
       let eventCount = 0;
       for await (const event of runSipTest(config)) {
         eventCount++;
         tui.streamMessage(`\n  [${event.type.toUpperCase()}] ${event.message}`);
       }
-      
+
       tui.streamMessage('\n[Tool] Complete\n');
 
       // Should have multiple events showing progress
       expect(eventCount).toBeGreaterThan(1);
-      
-      const fullOutput = output.join('');
+
+      const fullOutput = terminal.getFullOutput();
       expect(fullOutput).toContain('[INFO]');
       expect(fullOutput).toContain('Starting');
     }, 10000);
@@ -116,22 +110,23 @@ describe('LiveKit SIP Integration', () => {
         codecs: ['opus', 'PCMU'],
         transport: 'udp',
         mediaPort: 10000,
-        timeout: 5000
+        timeout: 5000,
+        responseWaitTime: 1
       };
 
       tui.streamMessage('\n[Tool] Executing sip_test...');
-      
+
       const events = [];
       for await (const event of runSipTest(config)) {
         events.push(event);
         tui.streamMessage(`\n  [${event.type.toUpperCase()}] ${event.message}`);
       }
-      
+
       tui.streamMessage('\n[Tool] Complete\n');
 
       expect(events.length).toBeGreaterThan(0);
-      
-      const fullOutput = output.join('');
+
+      const fullOutput = terminal.getFullOutput();
       expect(fullOutput).toContain('INVITE');
       expect(fullOutput).toContain('opus');
     }, 10000);
@@ -152,18 +147,18 @@ describe('LiveKit SIP Integration', () => {
       };
 
       tui.streamMessage('\n[Tool] Executing sip_test...');
-      
+
       const events = [];
       for await (const event of runSipTest(config)) {
         events.push(event);
         tui.streamMessage(`\n  [${event.type.toUpperCase()}] ${event.message}`);
       }
-      
+
       tui.streamMessage('\n[Tool] Complete\n');
 
-      const fullOutput = output.join('');
+      const fullOutput = terminal.getFullOutput();
       expect(fullOutput).toContain('Tool');
-      
+
       // Should have completed (either success or timeout)
       expect(events.length).toBeGreaterThan(0);
     }, 10000);
@@ -173,11 +168,11 @@ describe('LiveKit SIP Integration', () => {
     it('simulates full user interaction with LiveKit', async () => {
       // Start
       tui.start();
-      expect(output.join('')).toContain('Pinmoli');
+      expect(terminal.getFullOutput()).toContain('Pinmoli');
 
       // User asks to test
       tui.addMessage('user', `Test ${LIVEKIT_ENDPOINT}`);
-      expect(output.join('')).toContain('livekit.cloud');
+      expect(terminal.getFullOutput()).toContain('livekit.cloud');
 
       // Assistant responds
       tui.addMessage('assistant', 'Running SIP OPTIONS test against LiveKit...');
@@ -193,14 +188,14 @@ describe('LiveKit SIP Integration', () => {
       };
 
       tui.streamMessage('\n[Tool] Executing sip_test...');
-      
+
       const events = [];
       for await (const event of runSipTest(config)) {
         events.push(event);
         const timestamp = new Date(event.timestamp).toISOString().split('T')[1].split('.')[0];
         tui.streamMessage(`\n  [${timestamp}] [${event.type.toUpperCase()}] ${event.message}`);
       }
-      
+
       tui.streamMessage('\n[Tool] Complete\n');
 
       // Assistant summarizes
@@ -212,13 +207,13 @@ describe('LiveKit SIP Integration', () => {
       }
 
       // Verify complete flow
-      const fullOutput = output.join('');
+      const fullOutput = terminal.getFullOutput();
       expect(fullOutput).toContain('Pinmoli');
       expect(fullOutput).toContain('livekit.cloud');
       expect(fullOutput).toContain('[Tool] Executing sip_test');
       expect(fullOutput).toContain('[Tool] Complete');
       expect(fullOutput).toContain('Test completed');
-      
+
       // Should have real events
       expect(events.length).toBeGreaterThan(0);
     }, 10000);
@@ -229,7 +224,7 @@ describe('LiveKit SIP Integration', () => {
       // Test 1: OPTIONS
       tui.addMessage('user', 'Test OPTIONS');
       tui.streamMessage('\n[Tool] Executing sip_test...');
-      
+
       const config1: TestConfig = {
         uri: LIVEKIT_ENDPOINT,
         method: 'OPTIONS',
@@ -248,7 +243,7 @@ describe('LiveKit SIP Integration', () => {
       // Test 2: INVITE
       tui.addMessage('user', 'Now test INVITE');
       tui.streamMessage('\n[Tool] Executing sip_test...');
-      
+
       const config2: TestConfig = {
         uri: LIVEKIT_ENDPOINT,
         method: 'INVITE',
@@ -264,7 +259,7 @@ describe('LiveKit SIP Integration', () => {
       tui.streamMessage('\n[Tool] Complete\n');
       tui.addMessage('assistant', 'INVITE test done');
 
-      const fullOutput = output.join('');
+      const fullOutput = terminal.getFullOutput();
       expect(fullOutput).toContain('OPTIONS test done');
       expect(fullOutput).toContain('INVITE test done');
     }, 20000);
@@ -276,18 +271,19 @@ describe('LiveKit SIP Integration', () => {
       tui.addMessage('user', 'Test LiveKit with different codecs');
 
       const codecs = [['opus'], ['PCMU'], ['PCMA'], ['opus', 'PCMU']];
-      
+
       for (const codecList of codecs) {
         tui.addMessage('assistant', `Testing with: ${codecList.join(', ')}`);
         tui.streamMessage('\n[Tool] Executing sip_test...');
-        
+
         const config: TestConfig = {
           uri: LIVEKIT_ENDPOINT,
           method: 'INVITE',
           codecs: codecList,
           transport: 'udp',
           mediaPort: 10000,
-          timeout: 3000
+          timeout: 3000,
+          responseWaitTime: 1
         };
 
         for await (const event of runSipTest(config)) {
@@ -298,7 +294,7 @@ describe('LiveKit SIP Integration', () => {
         tui.streamMessage('\n[Tool] Complete\n');
       }
 
-      const fullOutput = output.join('');
+      const fullOutput = terminal.getFullOutput();
       expect(fullOutput).toContain('opus');
       expect(fullOutput).toContain('PCMU');
     }, 30000);

@@ -4,7 +4,7 @@
  * Test script for LiveKit SIP endpoint
  */
 
-import { executeSipTest } from './dist/sip/transport.js';
+import { runSipTest } from './dist/sip/engine.js';
 
 async function main() {
   const config = {
@@ -21,7 +21,7 @@ async function main() {
   console.log(`Method: ${config.method}\n`);
 
   try {
-    for await (const event of executeSipTest(config)) {
+    for await (const event of runSipTest(config)) {
       const time = new Date(event.timestamp).toLocaleTimeString();
       const status = event.status ? ` [${event.status}]` : '';
       console.log(`[${time}] ${event.type}: ${event.message}${status}`);

@@ -2,13 +2,51 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Rules for Claude
+
+1. **Be brutally honest about what was actually tested.** Unit tests that run locally are not the same as integration/live tests that hit real endpoints. Never present local-only tests as proof that a fix works against a remote service. State clearly: "unit tests passed (local only)" vs "live tests passed (hit LiveKit)".
+2. **Failure is acceptable. Misrepresenting results is not.** If something doesn't work, say so. Don't spin partial results as success. Don't optimize for appearing successful — optimize for accuracy.
+3. **When asked to run tests, run the actual tests.** Don't substitute a different test script and present it as equivalent. If TUI tests exist, run the TUI tests. If integration tests exist, run the integration tests. Don't write new ad-hoc scripts when existing test infrastructure already covers the case.
+4. **Distinguish between "code compiles" and "feature works".** A clean build and passing unit tests prove correctness of isolated functions. They do not prove the feature works end-to-end against a real endpoint.
+5. **EVERYTHING runs inside Docker. Non-negotiable.** Never run tests, builds, type-checks, or the TUI on the local laptop. The container has ffmpeg, espeak-ng, and other dependencies that don't exist locally. Running outside Docker gives misleading results. Use `docker compose exec` or `docker compose run` for ALL commands: `npm test`, `npx tsc --noEmit`, `npx tsx`, `node`, etc. If the container isn't running, start it with `docker compose up -d` first. There are zero exceptions to this rule.
+
 ## Project Overview
 
 "Postman for Voice" — a general-purpose developer workspace for testing, debugging, and building real-time voice applications. Provides a web UI for SIP signaling (INVITE, REGISTER, OPTIONS), real-time diagnostic logging via Socket.io, SDP inspection, and audio injection/RTP streaming against any SIP platform (LiveKit, Daily.co, Twilio, Asterisk, etc.).
 
 ## Commands
 
-All SIP/voice test commands **must** run inside the Docker container (requires ffmpeg, espeak-ng, sipp, drachtio-srf).
+**ALL commands run inside Docker. No exceptions.**
+
+### Pinmoli (packages/pinmoli/)
+
+```bash
+# Start the pinmoli container (from packages/pinmoli/)
+cd packages/pinmoli && docker compose up -d
+
+# Run the TUI interactively (requires ANTHROPIC_API_KEY in .env or env)
+docker compose exec pinmoli npx tsx src/cli.ts
+
+# Type-check
+docker compose exec pinmoli npx tsc --noEmit
+
+# Run all tests
+docker compose exec pinmoli npx vitest run
+
+# Run unit tests only
+docker compose exec pinmoli npx vitest run test/unit/
+
+# Run integration tests only
+docker compose exec pinmoli npx vitest run test/integration/
+
+# Run live tests (hits real LiveKit endpoint)
+docker compose exec pinmoli npx vitest run test/live/
+
+# Rebuild container after Dockerfile or dependency changes
+docker compose build && docker compose up -d
+```
+
+### Frontend (frontend/)
 
 ```bash
 # Start the full stack (frontend + drachtio SIP server)
@@ -28,12 +66,6 @@ docker compose exec frontend node scan-extensions.mjs  # Extension discovery
 # CLI engine test (no UI, no SDK — runs sip-engine directly)
 PARAMS=$(echo '{"method":"INVITE","uri":"sip:+1234567890@5eezfwavhxe.sip.livekit.cloud","transport":"auto","headers":{},"codecs":["opus","PCMU"],"audio":{"source":"tone","frequency":440,"duration":5}}' | base64 -w 0)
 docker compose exec frontend node src/lib/sip-engine.mjs "$PARAMS"
-
-# Frontend-only (from frontend/ directory, but prefer Docker)
-npm run dev      # Dev server with Socket.io (node server.js)
-npm run build    # Next.js production build
-npm run lint     # ESLint (includes SIP correctness rules)
-npm test         # Vitest
 ```
 
 **Port 5060 conflict:** Only one process can bind port 5060. If running sip-engine directly while the dev server is up, kill the conflicting process first (`kill $(lsof -ti:5060)` inside the container).
