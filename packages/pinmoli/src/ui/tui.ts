@@ -120,11 +120,12 @@ export class PinmoliTUI {
             return { consume: true };
           }
 
-          // Priority 3: Double-tap to quit
+          // Priority 3: Double-tap to quit — resolve pending input as 'exit'
+          // so the REPL loop in cli.ts breaks cleanly (no process.exit here)
           if (this.quitArmed) {
             this.clearQuitArmed();
-            this.stop();
-            process.exit(0);
+            this.editor!.onSubmit?.('exit');
+            return { consume: true };
           }
 
           // Arm quit — show hint, start timeout

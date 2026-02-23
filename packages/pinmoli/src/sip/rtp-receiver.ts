@@ -145,11 +145,8 @@ export function sendRTPFromSocket(
         marker: isFirst,
       });
 
-      socket.send(packet, remotePort, remoteIp, (err) => {
-        if (err) {
-          // Log and continue — packet loss is normal in RTP
-          console.error(`RTP send error: ${err.message}`);
-        }
+      socket.send(packet, remotePort, remoteIp, () => {
+        // Packet loss is normal in RTP — silently continue
       });
 
       packetsSent++;

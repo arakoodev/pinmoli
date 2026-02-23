@@ -56,21 +56,9 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
     const sipSocket = dgram.createSocket('udp4');
     const rtpSocket = dgram.createSocket('udp4');
 
-    // Get local IP for SDP and SIP headers
-    const { networkInterfaces } = await import('os');
-    const nets = networkInterfaces();
-    let localIp = '0.0.0.0';
-    
-    // Find first non-internal IPv4 address
-    for (const name of Object.keys(nets)) {
-      for (const net of nets[name] || []) {
-        if (net.family === 'IPv4' && !net.internal) {
-          localIp = net.address;
-          break;
-        }
-      }
-      if (localIp !== '0.0.0.0') break;
-    }
+    // Get local IP for SDP and SIP headers (throws if no routable interface)
+    const { getLocalIp } = await import('../network/utils.js');
+    const localIp = getLocalIp();
 
     // Bind SIP socket
     await new Promise<void>((resolve, reject) => {
@@ -203,6 +191,10 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
       // Handle 200 OK for INVITE - send ACK and audio (only once)
       if (resp.statusCode === 200 && config.method === 'INVITE' && !inviteHandled) {
         inviteHandled = true;
+        // Parse To-tag from response (RFC 3261: required for in-dialog ACK/BYE)
+        const toTagMatch = resp.response.match(/To:[^\r\n]*;tag=([^\s;>\r\n]+)/i);
+        const toTag = toTagMatch ? toTagMatch[1] : '';
+
         // Parse SDP answer
         let remoteIp = host;
         let remotePort = config.mediaPort;
@@ -225,8 +217,8 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           }
         }
 
-        // Send ACK
-        const ackMessage = buildAckRequest(config.uri, host, port, callId, fromTag, branch, localIp, sipPort);
+        // Send ACK (with To-tag from 200 OK per RFC 3261 Section 12.2.1.1)
+        const ackMessage = buildAckRequest(config.uri, host, port, callId, fromTag, toTag, branch, localIp, sipPort);
         yield {
           type: 'sip',
           timestamp: Date.now(),
@@ -348,8 +340,8 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
             : `Call was active for ${waitTime}s`
         };
 
-        // Send BYE to hang up
-        const byeMessage = buildByeRequest(config.uri, host, port, callId, fromTag, branch, localIp, sipPort);
+        // Send BYE to hang up (with To-tag for dialog matching)
+        const byeMessage = buildByeRequest(config.uri, host, port, callId, fromTag, toTag, branch, localIp, sipPort);
         yield {
           type: 'sip',
           timestamp: Date.now(),
@@ -447,12 +439,12 @@ function buildInviteRequest(uri: string, host: string, port: number, callId: str
   ].join('\r\n');
 }
 
-function buildAckRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string, localIp: string, localPort: number): string {
+function buildAckRequest(uri: string, host: string, port: number, callId: string, fromTag: string, toTag: string, branch: string, localIp: string, localPort: number): string {
   return [
     `ACK ${uri} SIP/2.0`,
     `Via: SIP/2.0/UDP ${localIp}:${localPort};branch=${branch}`,
     `From: <sip:pinmoli@pinmoli.local>;tag=${fromTag}`,
-    `To: <${uri}>`,
+    `To: <${uri}>${toTag ? `;tag=${toTag}` : ''}`,
     `Call-ID: ${callId}`,
     `CSeq: 1 ACK`,
     `Max-Forwards: 70`,
@@ -463,12 +455,12 @@ function buildAckRequest(uri: string, host: string, port: number, callId: string
   ].join('\r\n');
 }
 
-function buildByeRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string, localIp: string, localPort: number): string {
+function buildByeRequest(uri: string, host: string, port: number, callId: string, fromTag: string, toTag: string, branch: string, localIp: string, localPort: number): string {
   return [
     `BYE ${uri} SIP/2.0`,
     `Via: SIP/2.0/UDP ${localIp}:${localPort};branch=${branch}`,
     `From: <sip:pinmoli@pinmoli.local>;tag=${fromTag}`,
-    `To: <${uri}>`,
+    `To: <${uri}>${toTag ? `;tag=${toTag}` : ''}`,
     `Call-ID: ${callId}`,
     `CSeq: 2 BYE`,
     `Max-Forwards: 70`,

@@ -146,14 +146,15 @@ async function generateSilence(output: string, duration: number): Promise<boolea
 
 async function generateSpeech(output: string, text: string): Promise<boolean> {
   return new Promise((resolve) => {
-    // Try espeak first
-    const espeak = spawn('espeak', [text, '-w', '/tmp/speech.wav']);
+    // Use unique temp path to avoid collisions between concurrent generations
+    const tmpFile = `/tmp/speech-${Date.now()}-${process.pid}.wav`;
+    const espeak = spawn('espeak', [text, '-w', tmpFile]);
 
     espeak.on('close', (code) => {
       if (code === 0) {
         // Convert to PCMU
         const ffmpeg = spawn('ffmpeg', [
-          '-i', '/tmp/speech.wav',
+          '-i', tmpFile,
           '-acodec', 'pcm_mulaw', '-ar', '8000', '-ac', '1', '-y',
           output
         ]);

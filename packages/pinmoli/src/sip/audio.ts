@@ -38,7 +38,6 @@ export async function streamAudioFile(
 
   // Check if file exists
   if (!existsSync(filePath)) {
-    console.error(`Audio file not found: ${filePath}`);
     return false;
   }
 

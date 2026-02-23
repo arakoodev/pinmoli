@@ -13,7 +13,10 @@ export function getLocalIp(): string {
       }
     }
   }
-  return '127.0.0.1';
+  throw new Error(
+    'No routable IPv4 interface found. ' +
+    'SIP/SDP headers require a real IP — 127.0.0.1 is unreachable from remote peers.'
+  );
 }
 
 export function getPublicIp(): Promise<string> {

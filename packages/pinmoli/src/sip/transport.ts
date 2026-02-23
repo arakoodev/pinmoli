@@ -39,11 +39,13 @@ export async function* executeSipTest(config: TestConfig): AsyncGenerator<SipEve
   };
 
   const socket = dgram.createSocket('udp4');
-  const localPort = 5060 + Math.floor(Math.random() * 1000);
 
+  // Bind to port 0 — OS assigns an available port.
+  // Do NOT use Math.random() for ports: they won't match Docker exposure.
   await new Promise<void>((resolve) => {
-    socket.bind(localPort, () => resolve());
+    socket.bind(0, () => resolve());
   });
+  const localPort = socket.address().port;
 
   yield {
     type: 'network',
