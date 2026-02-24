@@ -1,8 +1,8 @@
 # Pinmoli
 
-*From Tamil பிபின்மொழி (pipin mozhi) -- "afterword"*
+*From Tamil பின்மொழி (pin mozhi) -- "afterword"*
 
-An AI-powered CLI for testing SIP and WebRTC voice endpoints. Point it at any SIP URI, describe what you want to test in plain English, and Pinmoli handles the protocol details -- INVITE flows, codec negotiation, RTP streaming, failure analysis.
+An AI-powered CLI for testing SIP and WebRTC voice endpoints. Describe what you want to test in plain English, and Pinmoli handles the protocol details -- INVITE flows, codec negotiation, RTP streaming, failure analysis.
 
 Think "Postman for Voice", but conversational.
 
@@ -39,6 +39,112 @@ Pinmoli: Running INVITE test against sip:+15551234567@trunk.example.com...
 - **Test persistence** -- save and reload test configurations (SQLite with FTS5)
 - **Works with any SIP endpoint** -- LiveKit, Daily.co, Twilio, Asterisk, FreeSWITCH, or any RFC 3261-compliant server
 - **Runs in Docker** -- all dependencies (ffmpeg, espeak, tini) included, no local setup required
+
+## Architecture
+
+Pinmoli is built on [pi](https://github.com/badlogic/pi-mono), the same open-source agent framework that powers [OpenClaw](https://github.com/openclaw/openclaw). Where OpenClaw uses pi to build a general-purpose personal AI assistant (messaging gateway, file operations, shell commands across 50+ integrations), Pinmoli takes the opposite approach: a **domain-restricted agent** that does exactly one thing -- SIP/WebRTC testing -- and does it well.
+
+The key difference is scope. OpenClaw embeds `pi-coding-agent` to give an LLM full access to read, write, edit, and bash tools across an entire system. Pinmoli uses only `pi-agent-core` and `pi-ai` with a locked-down tool allowlist of 6 SIP-specific tools. The LLM cannot touch the filesystem, run shell commands, or do anything outside voice protocol testing.
+
+### Pi libraries
+
+```
+pi-ai                              pi-tui
+Multi-provider LLM abstraction     Terminal UI with diff rendering
+Anthropic, OpenAI, Google,         Editor, Markdown, Box, Text
+Bedrock, Mistral, Groq, ...       Keyboard input, layout engine
+         │                                   │
+         ▼                                   ▼
+pi-agent-core                      Pinmoli TUI (src/ui/tui.ts)
+Agent loop, tool execution,        Wraps pi-tui for interactive mode
+event subscription, AbortSignal    Falls back to raw Terminal for tests
+         │
+         ▼
+PinmoliAgent (src/agent/runtime.ts)
+Domain-restricted system prompt
+6-tool allowlist, event routing
+```
+
+Pinmoli uses three pi packages:
+
+| Package | Role in Pinmoli |
+|---------|----------------|
+| [`@mariozechner/pi-agent-core`](https://www.npmjs.com/package/@mariozechner/pi-agent-core) | Agent loop -- receives user input, calls LLM, executes tools, streams events back |
+| [`@mariozechner/pi-ai`](https://www.npmjs.com/package/@mariozechner/pi-ai) | LLM provider abstraction -- swap between Gemini, Claude, GPT with one config change |
+| [`@mariozechner/pi-tui`](https://www.npmjs.com/package/@mariozechner/pi-tui) | Terminal rendering -- differential updates, editor with autocomplete, flicker-free output |
+
+### How the pieces connect
+
+```
+User input
+  │
+  ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  TUI  (src/ui/tui.ts)                                           │
+│  pi-tui Editor → reads input → sends to agent                   │
+│  Agent events → streamed back → rendered in real time            │
+│  Ctrl+C: abort current operation / clear input / quit            │
+└──────────────────────┬───────────────────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  Agent  (src/agent/runtime.ts)                                   │
+│  pi-agent-core Agent with pi-ai model                            │
+│                                                                  │
+│  System prompt constrains LLM to SIP testing only:               │
+│  "You are Pinmoli, a SIP/WebRTC testing assistant.               │
+│   You ONLY help test voice protocols.                            │
+│   You CANNOT edit files, run bash, or access the filesystem."    │
+│                                                                  │
+│  Tool allowlist enforced by registry (src/tools/registry.ts):    │
+│  sip_test, generate_audio, analyze_failure,                      │
+│  save_test, load_test, list_tests                                │
+└──────────────────────┬───────────────────────────────────────────┘
+                       │  LLM decides which tool to call
+                       ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  Tools  (src/tools/*.ts)                                         │
+│                                                                  │
+│  sip_test ─────► SIP Engine (async generator, streams events)    │
+│  generate_audio ► ffmpeg/espeak (sine, DTMF, silence, speech)    │
+│  analyze_failure ► Pattern matching on SIP event history         │
+│  save/load/list ► SQLite with FTS5 (src/storage/db.ts)           │
+└──────────────────────┬───────────────────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  SIP Engine  (src/sip/engine.ts)                                 │
+│                                                                  │
+│  async function* runSipTest(config): AsyncGenerator<SipEvent>    │
+│                                                                  │
+│  ┌─ protocol.ts ── SIP message builder (INVITE, ACK, BYE)       │
+│  ├─ sdp.ts ─────── SDP offer/answer (opus, PCMU, PCMA, G722)    │
+│  ├─ rtp-receiver.ts ── RTP send/receive on single UDP socket     │
+│  └─ audio.ts ───── Sample resolution (WAV files, generated)      │
+│                                                                  │
+│  Yields events as they happen:                                   │
+│    SIP messages, RTP stats, diagnostics, codec negotiation       │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Why async generators
+
+The SIP engine is an `async function*` that yields events as they happen -- a SIP `100 Trying` at 12ms, a `200 OK` at 1200ms, RTP packet counts every second. The TUI renders each event the moment it arrives. No buffering, no callbacks, no polling.
+
+```typescript
+// The engine yields events in real time
+for await (const event of runSipTest(config)) {
+  tui.render(event);  // instant display
+}
+```
+
+This design makes the engine usable outside the TUI too -- pipe events to NDJSON, feed them into a test assertion, or stream them over a websocket.
+
+### Why domain restriction matters
+
+General-purpose agents (like OpenClaw) give the LLM access to bash, file I/O, and the full system. That power makes sense for a personal assistant. For a SIP testing tool, it's a liability -- you don't want an LLM accidentally `rm -rf`-ing your project while trying to debug a codec mismatch.
+
+Pinmoli's agent can only call 6 tools, all SIP-related. The system prompt explicitly forbids filesystem access, and the tool registry enforces the allowlist at runtime. The LLM stays in its lane.
 
 ## Quick Start
 
@@ -77,7 +183,6 @@ You: Generate speech saying "What is the weather today?" then call the agent
 If you just want to run SIP tests programmatically without the conversational TUI:
 
 ```bash
-# OPTIONS ping
 docker compose exec pinmoli npx tsx -e "
   import { runSipTest } from './src/sip/engine.js';
   for await (const event of runSipTest({
@@ -92,7 +197,7 @@ docker compose exec pinmoli npx tsx -e "
 
 ### LLM Provider
 
-Pinmoli defaults to **Google Vertex AI (Gemini 2.5 Flash)**. The provider is configured in `src/cli.ts` and supports multiple backends:
+Pinmoli defaults to **Google Vertex AI (Gemini 2.5 Flash)** via pi-ai. Since pi-ai supports 20+ providers, you can swap the backend with a config change:
 
 | Provider | Config value | Credentials |
 |----------|-------------|-------------|
@@ -164,65 +269,40 @@ Or generate tones:
 You: Generate a 1000Hz sine wave for 5 seconds, then test the endpoint
 ```
 
-## Architecture
-
-```
-┌──────────────────────────────────────┐
-│  TUI (pi-tui)                        │
-│  Terminal UI with streaming output    │
-└──────────────┬───────────────────────┘
-               │
-┌──────────────▼───────────────────────┐
-│  AI Agent (pi-agent-core)            │
-│  LLM-driven tool orchestration       │
-│  Streams events to TUI in real time  │
-└──────────────┬───────────────────────┘
-               │
-┌──────────────▼───────────────────────┐
-│  6 Tools                             │
-│  sip_test, generate_audio,           │
-│  analyze_failure, save/load/list     │
-└──────────────┬───────────────────────┘
-               │
-┌──────────────▼───────────────────────┐
-│  SIP Engine                          │
-│  UDP transport, SDP builder,         │
-│  RTP send/receive (single socket)    │
-└──────────────────────────────────────┘
-```
-
-### Key design decisions
-
-- **Single RTP socket**: Send and receive on the same UDP socket so the remote peer responds to the correct port. Previous ffmpeg-based transport used an ephemeral port that didn't match the SDP advertisement.
-- **Async generators**: The SIP engine yields events as they happen (`async function*`), enabling real-time streaming to the TUI.
-- **Network-aware headers**: SIP Via/Contact headers use the detected network IP (via `os.networkInterfaces()`), not `0.0.0.0` or Docker-internal addresses.
-
 ## Project Structure
 
 ```
 pinmoli/
 ├── src/
-│   ├── cli.ts                  # Entry point
-│   ├── agent/runtime.ts        # AI agent setup (pi-agent-core)
-│   ├── ui/tui.ts               # Terminal UI (pi-tui)
-│   ├── tools/                  # 6 tool implementations
+│   ├── cli.ts                  # Entry point, REPL loop
+│   ├── agent/runtime.ts        # PinmoliAgent wraps pi-agent-core
+│   ├── ui/
+│   │   ├── tui.ts              # PinmoliTUI wraps pi-tui
+│   │   ├── tool-output.ts      # Collapsible tool result rendering
+│   │   └── test-terminal.ts    # Test-mode Terminal implementation
+│   ├── tools/
+│   │   ├── registry.ts         # 6-tool allowlist enforcement
+│   │   ├── index.ts            # Tool registration
+│   │   ├── sip-test.ts         # SIP test execution (async generator)
+│   │   ├── generate-audio.ts   # Audio generation (ffmpeg, espeak)
+│   │   ├── analyze-failure.ts  # Diagnostic pattern matching
+│   │   └── save/load/list-tests.ts
 │   ├── sip/
-│   │   ├── engine.ts           # SIP test orchestration
+│   │   ├── engine.ts           # SIP test orchestration (async generator)
+│   │   ├── protocol.ts         # SIP message building
+│   │   ├── sdp.ts              # SDP offer/answer builder
 │   │   ├── rtp-receiver.ts     # RTP packet build/parse/send/receive
-│   │   ├── audio.ts            # Audio sample resolution
-│   │   ├── sdp.ts              # SDP builder
-│   │   ├── transport.ts        # UDP transport
-│   │   └── protocol.ts         # SIP utilities
-│   ├── storage/db.ts           # SQLite persistence
-│   ├── validation/schemas.ts   # Input validation (TypeBox)
-│   └── system-prompt.ts        # Agent system prompt
+│   │   └── audio.ts            # Audio sample resolution
+│   ├── storage/db.ts           # SQLite + FTS5 persistence
+│   ├── validation/schemas.ts   # TypeBox schemas
+│   └── commands/service-account.ts
 ├── audio-samples/              # Pre-generated PCMU WAV files
 ├── test/
-│   ├── unit/                   # Protocol, SDP, RTP, storage, validation
-│   ├── integration/            # TUI flows, end-to-end, bidirectional RTP
+│   ├── unit/                   # Protocol, SDP, RTP, storage, tools, lint
+│   ├── integration/            # TUI flows, e2e, bidirectional RTP
 │   └── live/                   # Tests against real SIP endpoints
-├── generate-audio-samples.sh   # Regenerate WAV files (ffmpeg + espeak)
-├── Dockerfile                  # Alpine + ffmpeg + espeak + tini
+├── eslint-plugin-pinmoli.cjs   # 8 lint rules from real SIP bugs
+├── Dockerfile                  # Alpine + Node 20 + ffmpeg + espeak + tini
 ├── docker-compose.yml
 └── entrypoint.sh
 ```
