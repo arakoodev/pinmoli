@@ -34,4 +34,3 @@ EXPOSE 5060/udp
 EXPOSE 10000/udp
 
 ENTRYPOINT ["sh", "entrypoint.sh"]
-CMD ["npx", "tsx", "src/cli.ts"]

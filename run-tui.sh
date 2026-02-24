@@ -12,5 +12,5 @@ echo ""
 echo "Starting..."
 sleep 2
 
-cd /home/sss/Code/nishirlabs/.worktrees/pi
+cd "$(dirname "$0")"
 node dist/index.js

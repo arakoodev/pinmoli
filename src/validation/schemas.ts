@@ -24,7 +24,8 @@ export const SipEventSchema = Type.Object({
     Type.Literal('fatal')
   ])),
   code: Type.Optional(Type.String()),
-  recovery: Type.Optional(Type.String())
+  recovery: Type.Optional(Type.String()),
+  rawMessage: Type.Optional(Type.String())
 });
 
 export type SipEvent = Static<typeof SipEventSchema>;

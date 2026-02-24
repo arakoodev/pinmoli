@@ -1,5 +1,5 @@
 {
-  "name": "@nishirlabs/pinmoli",
+  "name": "pinmoli",
   "version": "0.1.0",
   "description": "Standalone SIP/WebRTC testing agent built with pi libraries",
   "type": "module",

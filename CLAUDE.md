@@ -74,25 +74,29 @@ docker compose build && docker compose up -d
 
 ## Lint Rules (`eslint-plugin-pinmoli`)
 
-Custom ESLint plugin at `eslint-plugin-pinmoli.cjs` with 8 rules extracted from real bugs:
+Custom ESLint plugin at `eslint-plugin-pinmoli.cjs` with 10 rules extracted from real bugs:
 
-- **`pinmoli/no-sip-dialog`** — `sip.dialog()` does not exist in `sip` v0.0.6
-- **`pinmoli/no-unroutable-sdp-ip`** — Flags `0.0.0.0` and `1.1.1.1` in strings
-- **`pinmoli/no-literal-crlf-escape`** — Flags literal `\r\n` (4 chars) that should be actual CRLF
-- **`pinmoli/require-public-address`** — `sip.start()` without `publicAddress` causes Via to contain Docker container ID
-- **`pinmoli/no-local-ip-in-sip-uri`** — Flags `localIp` in `sip:` URI templates
-- **`pinmoli/no-spread-in-sip-headers`** — Spread after critical SIP fields silently overwrites them
-- **`pinmoli/no-sdp-lf-join`** — SDP joined with `'\n'` instead of `'\r\n'`
+- **`pinmoli/no-console-in-lib`** — `console.*` in library code corrupts the TUI display
+- **`pinmoli/no-process-exit`** — `process.exit()` skips SIP cleanup (no BYE, no socket close)
+- **`pinmoli/no-shared-tmp-path`** — Hardcoded `/tmp/foo.ext` collides under concurrent tool execution
+- **`pinmoli/no-unabortable-spawn`** — `spawn()` in tool `execute()` without abort signal handling leaves orphan processes
+- **`pinmoli/no-unroutable-ip-fallback`** — `0.0.0.0` or `127.0.0.1` as IP fallback creates unroutable SDP/SIP headers
 - **`pinmoli/no-random-sip-port`** — `Math.random()` for SIP port doesn't match Docker exposure
+- **`pinmoli/no-unrefed-timer-in-sip`** — `setTimeout()` without `.unref()` keeps event loop alive after Ctrl+C
+- **`pinmoli/require-to-tag-in-dialog`** — ACK/BYE builders must accept a `toTag` parameter (RFC 3261)
+- **`pinmoli/no-setinterval-in-ui`** — `setInterval()` in UI code bypasses pi-tui's render pipeline. Use `Loader`/`CancellableLoader`
+- **`pinmoli/require-cursor-hide-with-loader`** — `new Loader()` without `setShowHardwareCursor(false)` causes cursor flashing every 80ms render cycle
 
 Run `docker compose exec pinmoli npm run lint` before committing.
 
 ## Key Configuration
 
-- `.env` — `LIVEKIT_ENDPOINT`, GCP credentials
+- `.env` — `LIVEKIT_ENDPOINT`, LLM provider env vars (`GOOGLE_APPLICATION_CREDENTIALS`, `ANTHROPIC_API_KEY`, etc.)
 - `tsconfig.json` — TypeScript config
 - `vitest.config.ts` — Test config
 - `eslint.config.mjs` — ESLint flat config with pinmoli plugin
+
+**Credentials are never baked into the Docker image.** GCP service account keys and other secrets are provided at runtime via environment variables, volume mounts, or CLI flags. See `.dockerignore` for excluded patterns.
 
 ## Critical SIP Patterns
 

@@ -446,8 +446,177 @@ const plugin = {
         };
       },
     },
+
+    /* ------------------------------------------------------------------ */
+    /* Rule 9 — pinmoli/no-setinterval-in-ui                              */
+    /*                                                                    */
+    /* pi-tui provides Loader and CancellableLoader for animations with   */
+    /* proper cursor management, synchronized output (CSI 2026), and      */
+    /* 80ms frame timing. Raw setInterval bypasses the render pipeline,   */
+    /* causing flicker and unsynchronized cursor positioning.             */
+    /*                                                                    */
+    /* Origin: tui.ts had a manual setInterval at 200ms cycling braille   */
+    /* frames + calling requestRender(). Should have been new Loader().   */
+    /* ------------------------------------------------------------------ */
+    'no-setinterval-in-ui': {
+      meta: {
+        type: 'problem',
+        docs: {
+          description:
+            'Disallow setInterval() in UI code. ' +
+            'Use pi-tui Loader/CancellableLoader for animations.',
+        },
+        schema: [],
+        messages: {
+          forbidden:
+            'setInterval() in UI code bypasses pi-tui\'s render pipeline (synchronized output, differential rendering, cursor tracking). ' +
+            'Use new Loader(tui, colorFn, colorFn, "label") or CancellableLoader instead.',
+        },
+      },
+      create(context) {
+        return {
+          CallExpression(node) {
+            if (
+              node.callee.type === 'Identifier' &&
+              node.callee.name === 'setInterval'
+            ) {
+              context.report({ node, messageId: 'forbidden' });
+            }
+          },
+        };
+      },
+    },
+
+    /* ------------------------------------------------------------------ */
+    /* Rule 10 — pinmoli/require-cursor-hide-with-loader                  */
+    /*                                                                    */
+    /* When an animated component (Loader) triggers requestRender() every */
+    /* 80ms, the hardware cursor gets repositioned on each render —       */
+    /* causing visible flashing in the editor and next to rendered text.  */
+    /* Must hide cursor before adding animated components.                */
+    /*                                                                    */
+    /* Origin: tui.ts startThinking() created new Loader(tui, ...) without*/
+    /* hiding the cursor. Both the editor cursor and a phantom cursor     */
+    /* next to "Thinking..." flashed rapidly.                             */
+    /* ------------------------------------------------------------------ */
+    'require-cursor-hide-with-loader': {
+      meta: {
+        type: 'problem',
+        docs: {
+          description:
+            'Require setShowHardwareCursor(false) in functions that create a Loader. ' +
+            'Without it, the hardware cursor flashes on every 80ms render cycle.',
+        },
+        schema: [],
+        messages: {
+          missingCursorHide:
+            'new Loader() without setShowHardwareCursor(false) in the same function. ' +
+            'The Loader triggers requestRender() every 80ms, repositioning the hardware cursor each time. ' +
+            'Call setShowHardwareCursor(false) before creating the Loader to prevent cursor flashing.',
+        },
+      },
+      create(context) {
+        return {
+          // Check function declarations, expressions, and arrow functions
+          FunctionDeclaration(node) {
+            checkLoaderCursorHide(context, node);
+          },
+          FunctionExpression(node) {
+            checkLoaderCursorHide(context, node);
+          },
+          ArrowFunctionExpression(node) {
+            checkLoaderCursorHide(context, node);
+          },
+          // Also check method definitions (class methods, object methods)
+          'Property > :function'(node) {
+            checkLoaderCursorHide(context, node);
+          },
+        };
+      },
+    },
   },
 };
+
+/**
+ * Check if a function that creates a Loader also calls setShowHardwareCursor(false).
+ */
+function checkLoaderCursorHide(context, node) {
+  const body = node.body;
+  if (!body) return;
+
+  // Collect all nodes in the function body
+  const sourceCode = context.getSourceCode();
+  let hasLoader = false;
+  let loaderNode = null;
+  let hasCursorHide = false;
+
+  // Walk all descendant nodes
+  function walk(n) {
+    if (!n || typeof n !== 'object') return;
+    // Check for new Loader(
+    if (
+      n.type === 'NewExpression' &&
+      n.callee &&
+      n.callee.type === 'Identifier' &&
+      n.callee.name === 'Loader'
+    ) {
+      hasLoader = true;
+      if (!loaderNode) loaderNode = n;
+    }
+    // Check for setShowHardwareCursor(false)
+    if (
+      n.type === 'CallExpression' &&
+      n.callee &&
+      n.callee.type === 'Identifier' &&
+      n.callee.name === 'setShowHardwareCursor' &&
+      n.arguments.length >= 1 &&
+      n.arguments[0].type === 'Literal' &&
+      n.arguments[0].value === false
+    ) {
+      hasCursorHide = true;
+    }
+    // Also check method call: tui.setShowHardwareCursor(false), this.setShowHardwareCursor(false)
+    if (
+      n.type === 'CallExpression' &&
+      n.callee &&
+      n.callee.type === 'MemberExpression' &&
+      n.callee.property &&
+      n.callee.property.type === 'Identifier' &&
+      n.callee.property.name === 'setShowHardwareCursor' &&
+      n.arguments.length >= 1 &&
+      n.arguments[0].type === 'Literal' &&
+      n.arguments[0].value === false
+    ) {
+      hasCursorHide = true;
+    }
+    // Recurse into child nodes, but skip nested function boundaries
+    if (
+      n.type === 'FunctionDeclaration' ||
+      n.type === 'FunctionExpression' ||
+      n.type === 'ArrowFunctionExpression'
+    ) {
+      // Don't recurse into nested functions — scope is the containing function
+      if (n !== node) return;
+    }
+    for (const key of Object.keys(n)) {
+      if (key === 'parent') continue;
+      const child = n[key];
+      if (Array.isArray(child)) {
+        for (const item of child) {
+          if (item && typeof item.type === 'string') walk(item);
+        }
+      } else if (child && typeof child.type === 'string') {
+        walk(child);
+      }
+    }
+  }
+
+  walk(body);
+
+  if (hasLoader && !hasCursorHide) {
+    context.report({ node: loaderNode, messageId: 'missingCursorHide' });
+  }
+}
 
 /**
  * Check if a function that builds ACK/BYE messages includes a toTag parameter.

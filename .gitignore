@@ -8,3 +8,4 @@ dist/
 *.db-wal
 tsconfig.tsbuildinfo
 secrets/
+gcp-service-account.json

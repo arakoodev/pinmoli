@@ -22,23 +22,58 @@ Skip confirmation only if the user explicitly provided all parameters or said "u
   
   async execute(toolCallId, params, signal, onUpdate) {
     const config = params as any;
-    
+
     const events: SipEvent[] = [];
-    
+    const t0 = Date.now();
+
     try {
       // Stream events as they happen
       for await (const event of runSipTest(config)) {
         events.push(event);
-        
+
+        // Build verbose output lines
+        const elapsed = `+${((event.timestamp - t0) / 1000).toFixed(3)}s`;
+        const lines: string[] = [];
+
+        lines.push(`[${event.type.toUpperCase()}] ${elapsed} ${event.message}`);
+
+        // Show raw SIP messages (request sent / response received)
+        if (event.rawMessage) {
+          lines.push('  ┌──────────────────────────────────────');
+          for (const line of event.rawMessage.split(/\r?\n/)) {
+            if (line.trim()) lines.push(`  │ ${line}`);
+          }
+          lines.push('  └──────────────────────────────────────');
+        }
+
+        // Show SDP offer/answer inline (when no rawMessage already contains it)
+        if (event.sdpOffer && !event.rawMessage) {
+          lines.push('  SDP Offer:');
+          for (const line of event.sdpOffer.split(/\r?\n/)) {
+            if (line.trim()) lines.push(`    ${line}`);
+          }
+        }
+        if (event.sdpAnswer && !event.rawMessage) {
+          lines.push('  SDP Answer:');
+          for (const line of event.sdpAnswer.split(/\r?\n/)) {
+            if (line.trim()) lines.push(`    ${line}`);
+          }
+        }
+
+        // Show error recovery hints
+        if (event.recovery) {
+          lines.push(`  Recovery: ${event.recovery}`);
+        }
+
         // Stream to TUI via onUpdate
         onUpdate?.({
           content: [{
             type: 'text',
-            text: `[${event.type.toUpperCase()}] ${event.message}`
+            text: lines.join('\n')
           }],
           details: { event }
         });
-        
+
         // Check for abort signal
         if (signal?.aborted) {
           break;

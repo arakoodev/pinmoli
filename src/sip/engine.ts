@@ -109,6 +109,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
       timestamp: Date.now(),
       message: `Sending ${config.method} request...`,
       method: config.method,
+      rawMessage: sipMessage,
       ...(config.method === 'INVITE' && { sdpOffer: sdp })
     };
 
@@ -185,7 +186,8 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         type: 'sip',
         timestamp: Date.now(),
         message: `Received ${resp.statusCode} ${resp.statusText}`,
-        status: resp.statusCode
+        status: resp.statusCode,
+        rawMessage: resp.response
       };
 
       // Handle 200 OK for INVITE - send ACK and audio (only once)

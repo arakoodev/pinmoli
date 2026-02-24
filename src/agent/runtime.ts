@@ -82,6 +82,7 @@ export class PinmoliAgent {
     this.agent.subscribe((event) => {
       if (event.type === 'message_start') {
         if (this.tui && (event as any).message?.role === 'assistant') {
+          this.tui.stopThinking();
           this.tui.startAssistantStream();
           this.streamedToTui = true;
         }
@@ -137,7 +138,9 @@ export class PinmoliAgent {
    */
   async chat(message: string): Promise<string> {
     this.streamedToTui = false;
+    this.tui?.startThinking();
     await this.agent.prompt(message);
+    this.tui?.stopThinking();
 
     // Check for errors
     const state = this.agent.state;

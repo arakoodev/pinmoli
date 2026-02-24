@@ -1,7 +1,7 @@
 /**
  * ESLint flat config for Pinmoli.
  *
- * Includes eslint-plugin-pinmoli (local) — 8 rules extracted from
+ * Includes eslint-plugin-pinmoli (local) — 10 rules extracted from
  * real bugs made by Claude Code in this codebase.
  */
 
@@ -86,11 +86,13 @@ export default [
     },
   },
 
-  // UI code: no process.exit (but console is OK before TUI starts)
+  // UI code: no process.exit, no raw intervals, require cursor hide with Loader
   {
     files: ['src/ui/**/*.ts'],
     rules: {
       'pinmoli/no-process-exit': 'error',
+      'pinmoli/no-setinterval-in-ui': 'error',
+      'pinmoli/require-cursor-hide-with-loader': 'error',
     },
   },
 ];

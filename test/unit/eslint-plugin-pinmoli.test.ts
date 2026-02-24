@@ -282,3 +282,78 @@ describe('pinmoli/require-to-tag-in-dialog', () => {
     });
   });
 });
+
+// ---------- Rule 9: no-setinterval-in-ui ----------
+
+describe('pinmoli/no-setinterval-in-ui', () => {
+  it('flags setInterval() in UI code', () => {
+    ruleTester.run('no-setinterval-in-ui', plugin.rules['no-setinterval-in-ui'], {
+      valid: [
+        // setTimeout is fine
+        'setTimeout(() => {}, 1000);',
+        // Loader usage (the correct pattern)
+        'const loader = new Loader(tui, green, dim, "Thinking...");',
+        // requestAnimationFrame or other APIs
+        'requestAnimationFrame(render);',
+      ],
+      invalid: [
+        // The exact pattern from tui.ts — manual braille spinner
+        {
+          code: 'const id = setInterval(() => { frame++; tui.requestRender(); }, 200);',
+          errors: [{ messageId: 'forbidden' }],
+        },
+        // Bare setInterval
+        {
+          code: 'setInterval(tick, 80);',
+          errors: [{ messageId: 'forbidden' }],
+        },
+      ],
+    });
+  });
+});
+
+// ---------- Rule 10: require-cursor-hide-with-loader ----------
+
+describe('pinmoli/require-cursor-hide-with-loader', () => {
+  it('flags new Loader() without setShowHardwareCursor(false)', () => {
+    ruleTester.run('require-cursor-hide-with-loader', plugin.rules['require-cursor-hide-with-loader'], {
+      valid: [
+        // Correct: hide cursor before creating Loader
+        `function startThinking() {
+          setShowHardwareCursor(false);
+          const loader = new Loader(tui, green, dim, "Thinking...");
+        }`,
+        // Correct: method call on tui object
+        `function startThinking() {
+          tui.setShowHardwareCursor(false);
+          const loader = new Loader(tui, green, dim, "Thinking...");
+        }`,
+        // No Loader — no issue
+        `function doStuff() {
+          const x = 1;
+        }`,
+        // Arrow function with cursor hide
+        `const start = () => {
+          setShowHardwareCursor(false);
+          new Loader(tui, green, dim, "Working...");
+        }`,
+      ],
+      invalid: [
+        // The exact pattern from tui.ts — Loader without cursor hide
+        {
+          code: `function startThinking() {
+            const loader = new Loader(tui, green, dim, "Thinking...");
+          }`,
+          errors: [{ messageId: 'missingCursorHide' }],
+        },
+        // Arrow function missing cursor hide
+        {
+          code: `const start = () => {
+            new Loader(tui, green, dim, "Working...");
+          }`,
+          errors: [{ messageId: 'missingCursorHide' }],
+        },
+      ],
+    });
+  });
+});

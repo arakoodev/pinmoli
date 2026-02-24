@@ -8,4 +8,5 @@ if [ ! -f /app/audio-samples/sine-440hz.wav ]; then
 fi
 
 # Hand off to tini (PID 1: signal forwarding + zombie reaping)
-exec /sbin/tini -- "$@"
+# Always run the CLI — any docker run args are passed as CLI flags
+exec /sbin/tini -- npx tsx src/cli.ts "$@"

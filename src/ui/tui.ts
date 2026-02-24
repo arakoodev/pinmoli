@@ -12,6 +12,7 @@ import {
   Box,
   Text,
   Editor,
+  Loader,
   Key,
   matchesKey,
   CombinedAutocompleteProvider,
@@ -37,6 +38,9 @@ export class PinmoliTUI {
   // Streaming assistant message
   private streamingText?: Text;
   private streamingContent = '';
+
+  // "Thinking..." spinner (pi-tui Loader)
+  private thinkingLoader?: Loader;
 
   // Ctrl+C / Escape state machine
   private isAgentBusy = false;
@@ -224,7 +228,9 @@ export class PinmoliTUI {
   onToolStart(toolName: string): void {
     if (this.tui) {
       // Interactive mode: create collapsible section in chat
-      const section = new ToolOutputSection(toolName);
+      this.stopThinking();
+      this.tui.setShowHardwareCursor(false);
+      const section = new ToolOutputSection(toolName, this.tui);
       this.activeToolOutput = section;
       this.toolOutputs.push(section);
       this.chatContainer!.addChild(section);
@@ -241,6 +247,7 @@ export class PinmoliTUI {
       if (this.activeToolOutput) {
         this.activeToolOutput.markComplete(success);
         this.activeToolOutput = undefined;
+        this.tui.setShowHardwareCursor(true);
         this.tui.requestRender();
       }
     } else {
@@ -328,6 +335,34 @@ export class PinmoliTUI {
       this.tui.stop();
     } else {
       this.terminal?.stop();
+    }
+  }
+
+  // --- Thinking spinner ---
+
+  startThinking(): void {
+    if (this.tui) {
+      this.tui.setShowHardwareCursor(false);
+      this.thinkingLoader = new Loader(
+        this.tui,
+        (s: string) => `\x1b[2m${s}\x1b[0m`,
+        (s: string) => `\x1b[2m${s}\x1b[0m`,
+        'Thinking...'
+      );
+      this.chatContainer!.addChild(this.thinkingLoader);
+      this.tui.requestRender();
+    }
+  }
+
+  stopThinking(): void {
+    if (this.thinkingLoader) {
+      this.thinkingLoader.stop();
+      if (this.chatContainer) {
+        this.chatContainer.removeChild(this.thinkingLoader);
+      }
+      this.thinkingLoader = undefined;
+      this.tui?.setShowHardwareCursor(true);
+      this.tui?.requestRender();
     }
   }
 

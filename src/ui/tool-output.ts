@@ -4,9 +4,12 @@
  * Renders a collapsible section showing streaming tool events.
  * Auto-expanded while running, auto-collapsed when complete.
  * Ctrl+O toggles expansion.
+ * Animated spinner while running (same frames/timing as pi-tui Loader).
  */
 
-import type { Component } from '@mariozechner/pi-tui';
+import type { Component, TUI } from '@mariozechner/pi-tui';
+
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 export class ToolOutputSection implements Component {
   private toolName: string;
@@ -16,9 +19,30 @@ export class ToolOutputSection implements Component {
   private success = true;
   private _cache?: string[];
   private _cacheWidth?: number;
+  private spinnerFrame = 0;
+  private spinnerTimer?: ReturnType<typeof setInterval>;
+  private ui?: TUI;
 
-  constructor(toolName: string) {
+  constructor(toolName: string, ui?: TUI) {
     this.toolName = toolName;
+    this.ui = ui;
+    this.startSpinner();
+  }
+
+  private startSpinner(): void {
+    // eslint-disable-next-line pinmoli/no-setinterval-in-ui -- TODO: migrate to pi-tui Loader
+    this.spinnerTimer = setInterval(() => {
+      this.spinnerFrame = (this.spinnerFrame + 1) % SPINNER_FRAMES.length;
+      this.invalidate();
+      this.ui?.requestRender();
+    }, 80);
+  }
+
+  private stopSpinner(): void {
+    if (this.spinnerTimer) {
+      clearInterval(this.spinnerTimer);
+      this.spinnerTimer = undefined;
+    }
   }
 
   addLine(text: string): void {
@@ -30,6 +54,7 @@ export class ToolOutputSection implements Component {
     this.complete = true;
     this.success = success;
     this._expanded = false;
+    this.stopSpinner();
     this.invalidate();
   }
 
@@ -48,14 +73,14 @@ export class ToolOutputSection implements Component {
   }
 
   render(width: number): string[] {
-    if (this._cache && this._cacheWidth === width) {
+    if (this._cache && this._cacheWidth === width && this.complete) {
       return this._cache;
     }
 
     const arrow = this._expanded ? '\u25BC' : '\u25B6';
     const icon = this.complete
       ? (this.success ? '\u2713' : '\u2717')
-      : '\u27F3';
+      : SPINNER_FRAMES[this.spinnerFrame];
     const count = this.lines.length;
     const header = ` ${arrow} ${icon} ${this.toolName} (${count} event${count !== 1 ? 's' : ''})`;
 
@@ -70,9 +95,11 @@ export class ToolOutputSection implements Component {
 
     if (this._expanded) {
       for (const line of this.lines) {
-        // Indent + dim for event lines, truncate to width
-        const indented = `   \x1b[2m${line}\x1b[0m`;
-        result.push(indented);
+        // Split multi-line content (verbose SIP messages)
+        const sublines = line.split('\n');
+        for (const subline of sublines) {
+          result.push(`   \x1b[2m${subline}\x1b[0m`);
+        }
       }
     }
 
