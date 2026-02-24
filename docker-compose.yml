@@ -1,26 +1,19 @@
 services:
-  drachtio:
-    image: drachtio/drachtio-server:latest
-    ports:
-      - "5060:5060/udp"
-      - "5060:5060/tcp"
-    environment:
-      - DRACHTIO_SECRET=cymru
-    command: ["drachtio", "--daemon", "--loglevel", "info"]
-
-  frontend:
+  pinmoli:
     build:
-      context: ./frontend
+      context: .
       dockerfile: Dockerfile
-    depends_on:
-      - drachtio
-    ports:
-      - "3000:3000"
-      - "10000:10000/udp"
+    network_mode: host
     volumes:
-      - ./frontend:/app
+      - .:/app
+      - /app/node_modules
+      - ~/.pinmoli:/root/.pinmoli
+    env_file:
+      - ./.env
     environment:
-      - NODE_ENV=development
-    # Ensure any packages installed via shell inside the container are owned by the current user
-    user: "${UID:-1000}:${GID:-1000}"
-    command: npm run dev
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION:-us-central1}
+    stdin_open: true
+    tty: true
+    command: ["npx", "tsx", "src/cli.ts", "--service-account", "/app/gcp-service-account.json"]

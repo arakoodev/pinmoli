@@ -13,7 +13,7 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Load .env from repo root
-config({ path: resolve(__dirname, '../../.env') });
+config({ path: resolve(__dirname, '.env') });
 
 const endpoint = process.env.LIVEKIT_ENDPOINT || 'sip:5eezfwavhxe.sip.livekit.cloud';
 // Extract host from endpoint for OPTIONS (no phone number needed)

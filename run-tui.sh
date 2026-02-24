@@ -12,5 +12,5 @@ echo ""
 echo "Starting..."
 sleep 2
 
-cd /home/sss/Code/nishirlabs/.worktrees/pi/packages/pinmoli
+cd /home/sss/Code/nishirlabs/.worktrees/pi
 node dist/index.js

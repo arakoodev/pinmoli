@@ -51,7 +51,7 @@ Pinmoli: Running INVITE test against sip:+15551234567@trunk.example.com...
 
 ```bash
 git clone https://github.com/nishirlabs/pinmoli.git
-cd pinmoli/packages/pinmoli
+cd pinmoli
 
 # Place your GCP service account key
 cp /path/to/your-key.json gcp-service-account.json
@@ -200,7 +200,7 @@ You: Generate a 1000Hz sine wave for 5 seconds, then test the endpoint
 ## Project Structure
 
 ```
-packages/pinmoli/
+pinmoli/
 ├── src/
 │   ├── cli.ts                  # Entry point
 │   ├── agent/runtime.ts        # AI agent setup (pi-agent-core)
@@ -233,7 +233,6 @@ All tests run inside Docker.
 
 ```bash
 # Start the container
-cd packages/pinmoli
 docker compose up -d
 
 # Run all tests
@@ -295,7 +294,7 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
 ```bash
 # Fork and clone
 git clone https://github.com/your-fork/pinmoli.git
-cd pinmoli/packages/pinmoli
+cd pinmoli
 
 # Build the container
 docker compose build

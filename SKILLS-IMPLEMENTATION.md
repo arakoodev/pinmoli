@@ -28,14 +28,14 @@
 
 ### 2. Project Skill (Development)
 
-**Location:** `packages/pinmoli/.claude/skills/pinmoli-dev/`
+**Location:** `.claude/skills/pinmoli-dev/`
 
 **Files:**
 - `SKILL.md` - Development guide for contributors
 
 **Purpose:** Provides context for AI assistants working on Pinmoli codebase
 
-**Scope:** Only when working in `packages/pinmoli/` directory
+**Scope:** Only when working in the project root directory
 
 **Behavior:** Background skill (not user-invocable)
 
@@ -191,7 +191,7 @@ When user says:
 ### Project Skill (`pinmoli-dev`)
 
 **Auto-Invocation:**
-Automatically loaded when working in `packages/pinmoli/` directory
+Automatically loaded when working in the project root directory
 
 **Manual Invocation:**
 Not user-invocable (background context only)
@@ -437,7 +437,7 @@ ls -la ~/.aider/skills/
 # Should show: pinmoli -> ~/.claude/skills/pinmoli
 
 # Check project skill
-ls -la packages/pinmoli/.claude/skills/pinmoli-dev/
+ls -la .claude/skills/pinmoli-dev/
 # Should show: SKILL.md
 ```
 

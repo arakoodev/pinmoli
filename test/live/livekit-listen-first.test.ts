@@ -12,7 +12,7 @@ import { resolve } from 'path';
  */
 
 // Load .env from project root
-dotenv.config({ path: resolve(__dirname, '../../../.env') });
+dotenv.config({ path: resolve(__dirname, '../../.env') });
 
 const LIVEKIT_ENDPOINT = process.env.LIVEKIT_ENDPOINT || 'sip:5eezfwavhxe.sip.livekit.cloud';
 
