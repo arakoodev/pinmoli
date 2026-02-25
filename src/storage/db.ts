@@ -98,13 +98,13 @@ export function saveCollection(name: string, config: TestConfig): void {
 }
 
 export function loadCollection(name: string): TestConfig | null {
-  const row = getCollection.get(name) as any;
+  const row = getCollection.get(name) as { config: string } | undefined;
   if (!row) return null;
   return JSON.parse(row.config);
 }
 
 export function getAllCollections(): Array<{ name: string; createdAt: number }> {
-  const rows = listCollections.all() as any[];
+  const rows = listCollections.all() as Array<{ name: string; created_at: number }>;
   return rows.map(r => ({ name: r.name, createdAt: r.created_at }));
 }
 
@@ -118,7 +118,7 @@ export function addToHistory(config: TestConfig, result?: 'success' | 'error', s
 }
 
 export function getRecentHistory(): SavedRequest[] {
-  const rows = getHistory.all() as any[];
+  const rows = getHistory.all() as Array<{ id: string; config: string; timestamp: number; result?: 'success' | 'error'; status_code?: number }>;
   return rows.map(r => ({
     id: r.id,
     name: 'History entry',

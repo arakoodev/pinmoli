@@ -2,14 +2,15 @@ import { describe, it, expect } from 'vitest';
 import { registerAllTools, getAllTools } from '../../src/tools/index.js';
 
   describe('Tool Registration', () => {
-    it('registers all 6 SIP tools', () => {
+    it('registers all 7 tools', () => {
       registerAllTools();
       const tools = getAllTools();
-      
-      expect(tools).toHaveLength(6);
-      
+
+      expect(tools).toHaveLength(7);
+
       const toolNames = tools.map(t => t.name);
       expect(toolNames).toContain('sip_test');
+      expect(toolNames).toContain('webrtc_test');
       expect(toolNames).toContain('analyze_failure');
       expect(toolNames).toContain('save_test');
       expect(toolNames).toContain('load_test');

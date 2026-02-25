@@ -41,7 +41,7 @@ describe('End-to-End Flow Tests', () => {
 
     it('TUI receives tool execution events', async () => {
       const tui = new PinmoliTUI(terminal);
-      const agent = new PinmoliAgent(config, tui);
+      const _agent = new PinmoliAgent(config, tui);
 
       // Simulate tool execution by directly calling streamMessage
       tui.streamMessage('\n[Tool] Executing sip_test...');

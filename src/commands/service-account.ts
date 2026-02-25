@@ -14,7 +14,7 @@ export function configureServiceAccount(jsonPath: string, location = 'us-central
     return { success: false, message: `File not found: ${resolved}` };
   }
 
-  let json: any;
+  let json: { project_id?: string };
   try {
     json = JSON.parse(readFileSync(resolved, 'utf-8'));
   } catch {

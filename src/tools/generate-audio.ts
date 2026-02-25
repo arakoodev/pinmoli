@@ -25,9 +25,9 @@ const GenerateAudioParamsSchema = Type.Object({
   text: Type.Optional(Type.String({ 
     description: 'Text to synthesize (for speech)' 
   })),
-  digits: Type.Optional(Type.String({ 
-    pattern: '^[0-9*#]+$',
-    description: 'DTMF digits to generate (0-9, *, #)' 
+  digits: Type.Optional(Type.String({
+    pattern: '^[0-9*#A-Da-d]+$',
+    description: 'DTMF digits to generate (0-9, *, #, A-D)'
   }))
 });
 
@@ -120,14 +120,65 @@ async function generateSine(output: string, frequency: number, duration: number)
 
     ffmpeg.on('close', (code) => resolve(code === 0));
     ffmpeg.on('error', () => resolve(false));
-    setTimeout(() => { ffmpeg.kill(); resolve(false); }, 10000);
+    const timer = setTimeout(() => { ffmpeg.kill(); resolve(false); }, 10000);
+    timer.unref();
   });
 }
 
-async function generateDTMF(output: string, digits: string, duration: number): Promise<boolean> {
-  // Simplified: just use a tone for now
-  const freq = 697; // DTMF low frequency
-  return generateSine(output, freq, duration);
+// DTMF dual-tone frequency pairs (ITU-T Q.23)
+const DTMF_FREQ_MAP: Record<string, [number, number]> = {
+  '1': [697, 1209], '2': [697, 1336], '3': [697, 1477], 'A': [697, 1633],
+  '4': [770, 1209], '5': [770, 1336], '6': [770, 1477], 'B': [770, 1633],
+  '7': [852, 1209], '8': [852, 1336], '9': [852, 1477], 'C': [852, 1633],
+  '*': [941, 1209], '0': [941, 1336], '#': [941, 1477], 'D': [941, 1633],
+};
+
+async function generateDTMF(output: string, digits: string, _duration: number): Promise<boolean> {
+  // Build filter_complex: each digit is a dual-tone + silence gap, concatenated
+  const digitDuration = 0.16; // 160ms per digit
+  const gapDuration = 0.1;   // 100ms silence between digits
+  const filters: string[] = [];
+  const inputLabels: string[] = [];
+
+  for (let i = 0; i < digits.length; i++) {
+    const freqs = DTMF_FREQ_MAP[digits[i].toUpperCase()];
+    if (!freqs) continue;
+    const [lo, hi] = freqs;
+
+    // Dual-tone for this digit
+    const toneLabel = `t${i}`;
+    filters.push(
+      `aevalsrc='0.5*sin(2*PI*${lo}*t)+0.5*sin(2*PI*${hi}*t)':s=8000:d=${digitDuration}[${toneLabel}]`
+    );
+    inputLabels.push(`[${toneLabel}]`);
+
+    // Silence gap after digit (except last)
+    if (i < digits.length - 1) {
+      const gapLabel = `g${i}`;
+      filters.push(`aevalsrc=0:s=8000:d=${gapDuration}[${gapLabel}]`);
+      inputLabels.push(`[${gapLabel}]`);
+    }
+  }
+
+  if (inputLabels.length === 0) return false;
+
+  // Concatenate all segments
+  const concatFilter = `${inputLabels.join('')}concat=n=${inputLabels.length}:v=0:a=1[out]`;
+  filters.push(concatFilter);
+
+  return new Promise((resolve) => {
+    const ffmpeg = spawn('ffmpeg', [
+      '-filter_complex', filters.join(';'),
+      '-map', '[out]',
+      '-acodec', 'pcm_mulaw', '-ar', '8000', '-ac', '1', '-y',
+      output
+    ]);
+
+    ffmpeg.on('close', (code) => resolve(code === 0));
+    ffmpeg.on('error', () => resolve(false));
+    const timer = setTimeout(() => { ffmpeg.kill(); resolve(false); }, 10000);
+    timer.unref();
+  });
 }
 
 async function generateSilence(output: string, duration: number): Promise<boolean> {
@@ -140,7 +191,8 @@ async function generateSilence(output: string, duration: number): Promise<boolea
 
     ffmpeg.on('close', (code) => resolve(code === 0));
     ffmpeg.on('error', () => resolve(false));
-    setTimeout(() => { ffmpeg.kill(); resolve(false); }, 10000);
+    const timer = setTimeout(() => { ffmpeg.kill(); resolve(false); }, 10000);
+    timer.unref();
   });
 }
 
@@ -166,6 +218,7 @@ async function generateSpeech(output: string, text: string): Promise<boolean> {
     });
 
     espeak.on('error', () => resolve(false));
-    setTimeout(() => { espeak.kill(); resolve(false); }, 10000);
+    const timer = setTimeout(() => { espeak.kill(); resolve(false); }, 10000);
+    timer.unref();
   });
 }

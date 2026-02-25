@@ -7,9 +7,9 @@ const SIP_RESERVED_HEADERS = new Set([
 ]);
 
 export function mergeCustomHeaders(
-  baseHeaders: Record<string, any>,
+  baseHeaders: Record<string, string>,
   customHeaders: Record<string, string>
-): { headers: Record<string, any>; warnings: string[] } {
+): { headers: Record<string, string>; warnings: string[] } {
   const merged = { ...baseHeaders };
   const warnings: string[] = [];
 

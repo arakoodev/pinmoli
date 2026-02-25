@@ -10,13 +10,15 @@ import { saveTestTool } from './save-test.js';
 import { loadTestTool } from './load-test.js';
 import { listTestsTool } from './list-tests.js';
 import { generateAudioTool } from './generate-audio.js';
+import { webrtcTestTool } from './webrtc-test.js';
 
 /**
- * Register all SIP tools
+ * Register all tools (SIP + WebRTC)
  * This is the only way to register tools - no dynamic registration
  */
 export function registerAllTools(): void {
   registerTool(sipTestTool);
+  registerTool(webrtcTestTool);
   registerTool(analyzeFailureTool);
   registerTool(saveTestTool);
   registerTool(loadTestTool);
@@ -34,6 +36,7 @@ export function getAllTools() {
 // Re-export individual tools for testing
 export {
   sipTestTool,
+  webrtcTestTool,
   analyzeFailureTool,
   saveTestTool,
   loadTestTool,

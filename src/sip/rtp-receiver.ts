@@ -1,5 +1,12 @@
 import dgram from 'dgram';
 import { writeFileSync, readFileSync, existsSync } from 'fs';
+import {
+  DTMF_EVENT_MAP,
+  DTMF_DEFAULTS,
+  planDtmfDigit,
+  DtmfDetector,
+  type DtmfDetection,
+} from './dtmf.js';
 
 /**
  * RTP packet structure
@@ -102,34 +109,51 @@ export function loadAudioSample(filePath: string): Buffer | null {
   return buf.slice(chunk.offset, chunk.offset + chunk.size);
 }
 
+/** RTP stream state returned by sendRTPFromSocket for continuity */
+export interface RtpStreamState {
+  packetsSent: number;
+  ssrc: number;
+  sequenceNumber: number;
+  timestamp: number;
+}
+
 /**
  * Send RTP packets from an existing dgram socket at 20ms intervals.
  * Uses PCMU (PT=0): 160 bytes per packet = 20ms at 8kHz.
+ *
+ * Accepts optional initial state for SSRC/seq/ts continuity (e.g. for DTMF after audio).
+ * Returns final stream state so callers can continue the stream.
  */
 export function sendRTPFromSocket(
   socket: dgram.Socket,
   pcmuData: Buffer,
   remoteIp: string,
-  remotePort: number
-): Promise<{ packetsSent: number }> {
+  remotePort: number,
+  initialState?: Partial<Pick<RtpStreamState, 'ssrc' | 'sequenceNumber' | 'timestamp'>>
+): Promise<RtpStreamState> {
   return new Promise((resolve) => {
     if (pcmuData.length === 0) {
-      resolve({ packetsSent: 0 });
+      resolve({
+        packetsSent: 0,
+        ssrc: initialState?.ssrc ?? 0,
+        sequenceNumber: initialState?.sequenceNumber ?? 0,
+        timestamp: initialState?.timestamp ?? 0,
+      });
       return;
     }
 
     const PACKET_SIZE = 160; // 20ms at 8kHz
-    const ssrc = (Math.random() * 0xFFFFFFFF) >>> 0;
-    let sequenceNumber = (Math.random() * 0xFFFF) >>> 0;
-    let timestamp = (Math.random() * 0xFFFFFFFF) >>> 0;
+    const ssrc = initialState?.ssrc ?? ((Math.random() * 0xFFFFFFFF) >>> 0);
+    let sequenceNumber = initialState?.sequenceNumber ?? ((Math.random() * 0xFFFF) >>> 0);
+    let timestamp = initialState?.timestamp ?? ((Math.random() * 0xFFFFFFFF) >>> 0);
     let offset = 0;
     let packetsSent = 0;
-    let isFirst = true;
+    let isFirst = !initialState; // only mark first if starting fresh
 
     const interval = setInterval(() => {
       if (offset >= pcmuData.length) {
         clearInterval(interval);
-        resolve({ packetsSent });
+        resolve({ packetsSent, ssrc, sequenceNumber, timestamp });
         return;
       }
 
@@ -159,20 +183,142 @@ export function sendRTPFromSocket(
 }
 
 /**
- * Receive RTP audio on an existing socket
+ * Send RFC 4733 DTMF digits over an existing dgram socket.
+ * Uses planDtmfDigit() for packet planning, buildRTPPacket() for framing.
+ * All setTimeout calls get .unref().
+ *
+ * @param streamState - SSRC/seq/ts from prior audio send for stream continuity
+ */
+export function sendDtmfFromSocket(
+  socket: dgram.Socket,
+  digits: string,
+  remoteIp: string,
+  remotePort: number,
+  streamState: Pick<RtpStreamState, 'ssrc' | 'sequenceNumber' | 'timestamp'>,
+  onDigitSent?: (digit: string, eventCode: number) => void,
+): Promise<RtpStreamState> {
+  return new Promise((resolve) => {
+    if (digits.length === 0) {
+      resolve({ packetsSent: 0, ...streamState });
+      return;
+    }
+
+    let { ssrc, sequenceNumber, timestamp } = streamState;
+    let packetsSent = 0;
+    let digitIndex = 0;
+
+    function sendNextDigit(): void {
+      if (digitIndex >= digits.length) {
+        resolve({ packetsSent, ssrc, sequenceNumber, timestamp });
+        return;
+      }
+
+      const digit = digits[digitIndex];
+      const eventCode = DTMF_EVENT_MAP[digit];
+      if (eventCode === undefined) {
+        // Skip invalid digits
+        digitIndex++;
+        sendNextDigit();
+        return;
+      }
+
+      const packets = planDtmfDigit(eventCode);
+      // All packets for this digit share the same RTP timestamp
+      const digitTimestamp = timestamp;
+      let pktIndex = 0;
+
+      function sendNextPacket(): void {
+        if (pktIndex >= packets.length) {
+          // Advance timestamp past this digit + inter-digit gap
+          const totalMs = DTMF_DEFAULTS.digitDurationMs + DTMF_DEFAULTS.interDigitGapMs;
+          timestamp = (digitTimestamp + Math.floor(totalMs * DTMF_DEFAULTS.clockRate / 1000)) >>> 0;
+
+          onDigitSent?.(digit, eventCode);
+          digitIndex++;
+          sendNextDigit();
+          return;
+        }
+
+        const desc = packets[pktIndex];
+        const packet = buildRTPPacket({
+          payloadType: DTMF_DEFAULTS.payloadType,
+          sequenceNumber,
+          timestamp: digitTimestamp,
+          ssrc,
+          payload: desc.payload,
+          marker: desc.marker,
+        });
+
+        socket.send(packet, remotePort, remoteIp, () => {});
+
+        packetsSent++;
+        sequenceNumber = (sequenceNumber + 1) & 0xFFFF;
+        pktIndex++;
+
+        if (pktIndex < packets.length) {
+          const nextOffset = packets[pktIndex].timeOffsetMs;
+          const delay = nextOffset - desc.timeOffsetMs;
+          const timer = setTimeout(sendNextPacket, delay);
+          timer.unref();
+        } else {
+          // After last end packet, wait inter-digit gap then move to next digit
+          const timer = setTimeout(sendNextPacket, DTMF_DEFAULTS.interDigitGapMs);
+          timer.unref();
+        }
+      }
+
+      sendNextPacket();
+    }
+
+    sendNextDigit();
+  });
+}
+
+/** Options for receiveRTPAudio DTMF detection */
+export interface ReceiveRtpOptions {
+  dtmfDetector?: DtmfDetector;
+  onDtmf?: (detection: DtmfDetection) => void;
+}
+
+/**
+ * Receive RTP audio on an existing socket.
+ * Optionally detects DTMF via DtmfDetector (feeds PT 101 packets).
  */
 export async function receiveRTPAudio(
   socket: dgram.Socket,
   duration: number,
-  outputFile?: string
-): Promise<{ packetsReceived: number; audioData: Buffer[] }> {
+  outputFileOrOptions?: string | ReceiveRtpOptions,
+  options?: ReceiveRtpOptions,
+): Promise<{ packetsReceived: number; audioData: Buffer[]; dtmfDigits: string }> {
+  // Resolve overloaded params: (socket, duration, outputFile?, options?) or (socket, duration, options?)
+  let outputFile: string | undefined;
+  let opts: ReceiveRtpOptions | undefined;
+  if (typeof outputFileOrOptions === 'string') {
+    outputFile = outputFileOrOptions;
+    opts = options;
+  } else if (outputFileOrOptions && typeof outputFileOrOptions === 'object') {
+    opts = outputFileOrOptions;
+  }
+
   return new Promise((resolve) => {
     const audioData: Buffer[] = [];
     let packetsReceived = 0;
+    const detector = opts?.dtmfDetector;
 
     const messageHandler = (msg: Buffer) => {
       const packet = parseRTPPacket(msg);
-      if (packet && packet.payloadType === 0) { // PCMU
+      if (!packet) return;
+
+      // Feed DTMF detector (PT 101)
+      if (detector) {
+        const detection = detector.feed(packet.payloadType, packet.payload, packet.timestamp);
+        if (detection) {
+          opts?.onDtmf?.(detection);
+        }
+      }
+
+      // Only accumulate PCMU audio
+      if (packet.payloadType === 0) {
         audioData.push(packet.payload);
         packetsReceived++;
       }
@@ -181,7 +327,7 @@ export async function receiveRTPAudio(
     socket.on('message', messageHandler);
 
     // Stop after duration
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       socket.off('message', messageHandler);
 
       // Save to file if requested
@@ -190,8 +336,13 @@ export async function receiveRTPAudio(
         writeFileSync(outputFile, combinedAudio);
       }
 
-      resolve({ packetsReceived, audioData });
+      resolve({
+        packetsReceived,
+        audioData,
+        dtmfDigits: detector?.digits ?? '',
+      });
     }, duration * 1000);
+    timer.unref();
   });
 }
 

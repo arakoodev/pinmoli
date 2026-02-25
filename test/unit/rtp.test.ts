@@ -1,11 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { resolve } from 'path';
+import dgram from 'dgram';
 import {
   buildRTPPacket,
   parseRTPPacket,
   findDataChunk,
   loadAudioSample,
+  sendRTPFromSocket,
+  sendDtmfFromSocket,
+  receiveRTPAudio,
 } from '../../src/sip/rtp-receiver.js';
+import { DtmfDetector, buildDtmfPayload, DTMF_DEFAULTS } from '../../src/sip/dtmf.js';
 
 describe('buildRTPPacket', () => {
   it('creates a valid 12-byte header + payload', () => {
@@ -238,5 +243,229 @@ describe('loadAudioSample', () => {
 
   it('returns null for nonexistent file', () => {
     expect(loadAudioSample('/nonexistent/file.wav')).toBeNull();
+  });
+});
+
+describe('sendRTPFromSocket return state', () => {
+  it('returns ssrc, sequenceNumber, timestamp for stream continuity', async () => {
+    const socket = dgram.createSocket('udp4');
+    await new Promise<void>((resolve) => socket.bind(0, resolve));
+
+    // 3 packets worth of PCMU (3 * 160 = 480 bytes)
+    const pcmu = Buffer.alloc(480, 0x7F);
+    const result = await sendRTPFromSocket(socket, pcmu, '127.0.0.1', socket.address().port);
+
+    expect(result.packetsSent).toBe(3);
+    expect(typeof result.ssrc).toBe('number');
+    expect(typeof result.sequenceNumber).toBe('number');
+    expect(typeof result.timestamp).toBe('number');
+
+    socket.close();
+  });
+
+  it('returns zeros for empty data', async () => {
+    const socket = dgram.createSocket('udp4');
+    await new Promise<void>((resolve) => socket.bind(0, resolve));
+
+    const result = await sendRTPFromSocket(socket, Buffer.alloc(0), '127.0.0.1', 5000);
+    expect(result.packetsSent).toBe(0);
+
+    socket.close();
+  });
+
+  it('accepts initial state for continuity', async () => {
+    const socket = dgram.createSocket('udp4');
+    await new Promise<void>((resolve) => socket.bind(0, resolve));
+
+    const pcmu = Buffer.alloc(160, 0x7F); // 1 packet
+    const result = await sendRTPFromSocket(socket, pcmu, '127.0.0.1', socket.address().port, {
+      ssrc: 42,
+      sequenceNumber: 100,
+      timestamp: 8000,
+    });
+
+    expect(result.packetsSent).toBe(1);
+    expect(result.ssrc).toBe(42);
+    // After 1 packet: seq should be 101, ts should be 8000 + 160
+    expect(result.sequenceNumber).toBe(101);
+    expect(result.timestamp).toBe(8160);
+
+    socket.close();
+  });
+});
+
+describe('sendDtmfFromSocket', () => {
+  it('sends packets for a single digit', async () => {
+    const socket = dgram.createSocket('udp4');
+    await new Promise<void>((resolve) => socket.bind(0, resolve));
+
+    const sentDigits: string[] = [];
+    const result = await sendDtmfFromSocket(
+      socket, '5', '127.0.0.1', socket.address().port,
+      { ssrc: 1, sequenceNumber: 0, timestamp: 0 },
+      (digit) => sentDigits.push(digit),
+    );
+
+    expect(result.packetsSent).toBeGreaterThan(0);
+    expect(sentDigits).toEqual(['5']);
+
+    socket.close();
+  });
+
+  it('sends packets for multiple digits', async () => {
+    const socket = dgram.createSocket('udp4');
+    await new Promise<void>((resolve) => socket.bind(0, resolve));
+
+    const sentDigits: string[] = [];
+    const result = await sendDtmfFromSocket(
+      socket, '12#', '127.0.0.1', socket.address().port,
+      { ssrc: 1, sequenceNumber: 0, timestamp: 0 },
+      (digit) => sentDigits.push(digit),
+    );
+
+    expect(result.packetsSent).toBeGreaterThan(0);
+    expect(sentDigits).toEqual(['1', '2', '#']);
+
+    socket.close();
+  });
+
+  it('returns unchanged state for empty digits', async () => {
+    const socket = dgram.createSocket('udp4');
+    await new Promise<void>((resolve) => socket.bind(0, resolve));
+
+    const result = await sendDtmfFromSocket(
+      socket, '', '127.0.0.1', 5000,
+      { ssrc: 42, sequenceNumber: 10, timestamp: 1000 },
+    );
+
+    expect(result.packetsSent).toBe(0);
+    expect(result.ssrc).toBe(42);
+    expect(result.sequenceNumber).toBe(10);
+    expect(result.timestamp).toBe(1000);
+
+    socket.close();
+  });
+
+  it('advances timestamp between digits', async () => {
+    const socket = dgram.createSocket('udp4');
+    await new Promise<void>((resolve) => socket.bind(0, resolve));
+
+    const result = await sendDtmfFromSocket(
+      socket, '12', '127.0.0.1', socket.address().port,
+      { ssrc: 1, sequenceNumber: 0, timestamp: 0 },
+    );
+
+    // After 2 digits: timestamp should advance past both digit durations + gaps
+    expect(result.timestamp).toBeGreaterThan(0);
+
+    socket.close();
+  });
+});
+
+describe('receiveRTPAudio with DTMF detection', () => {
+  it('detects DTMF digits in incoming packets', async () => {
+    const socket = dgram.createSocket('udp4');
+    await new Promise<void>((resolve) => socket.bind(0, resolve));
+    const port = socket.address().port;
+
+    const detector = new DtmfDetector();
+    const detectedDigits: string[] = [];
+
+    // Start receiver with short duration
+    const receivePromise = receiveRTPAudio(socket, 0.3, {
+      dtmfDetector: detector,
+      onDtmf: (d) => detectedDigits.push(d.digit),
+    });
+
+    // Send a DTMF end packet (digit '5') via a separate socket
+    const sender = dgram.createSocket('udp4');
+    await new Promise<void>((resolve) => sender.bind(0, resolve));
+
+    const dtmfPayload = buildDtmfPayload(5, true, 10, 1280);
+    const rtpPacket = buildRTPPacket({
+      payloadType: DTMF_DEFAULTS.payloadType,
+      sequenceNumber: 1,
+      timestamp: 1000,
+      ssrc: 99,
+      payload: dtmfPayload,
+    });
+
+    sender.send(rtpPacket, port, '127.0.0.1');
+
+    const result = await receivePromise;
+
+    expect(result.dtmfDigits).toBe('5');
+    expect(detectedDigits).toEqual(['5']);
+    // DTMF packets should NOT be counted as audio
+    expect(result.packetsReceived).toBe(0);
+
+    sender.close();
+    socket.close();
+  });
+
+  it('receives audio and DTMF simultaneously', async () => {
+    const socket = dgram.createSocket('udp4');
+    await new Promise<void>((resolve) => socket.bind(0, resolve));
+    const port = socket.address().port;
+
+    const detector = new DtmfDetector();
+
+    const receivePromise = receiveRTPAudio(socket, 0.3, {
+      dtmfDetector: detector,
+    });
+
+    const sender = dgram.createSocket('udp4');
+    await new Promise<void>((resolve) => sender.bind(0, resolve));
+
+    // Send 1 PCMU audio packet
+    const audioPacket = buildRTPPacket({
+      payloadType: 0,
+      sequenceNumber: 1,
+      timestamp: 0,
+      ssrc: 100,
+      payload: Buffer.alloc(160, 0x7F),
+    });
+    sender.send(audioPacket, port, '127.0.0.1');
+
+    // Send 1 DTMF end packet (digit '#')
+    const dtmfPayload = buildDtmfPayload(11, true, 10, 1280);
+    const dtmfPacket = buildRTPPacket({
+      payloadType: DTMF_DEFAULTS.payloadType,
+      sequenceNumber: 2,
+      timestamp: 2000,
+      ssrc: 100,
+      payload: dtmfPayload,
+    });
+    sender.send(dtmfPacket, port, '127.0.0.1');
+
+    const result = await receivePromise;
+
+    expect(result.packetsReceived).toBe(1); // only PCMU counted
+    expect(result.dtmfDigits).toBe('#');
+
+    sender.close();
+    socket.close();
+  });
+
+  it('returns empty dtmfDigits when no detector provided', async () => {
+    const socket = dgram.createSocket('udp4');
+    await new Promise<void>((resolve) => socket.bind(0, resolve));
+
+    const result = await receiveRTPAudio(socket, 0.1);
+    expect(result.dtmfDigits).toBe('');
+
+    socket.close();
+  });
+
+  it('backward-compatible: still accepts outputFile as string', async () => {
+    const socket = dgram.createSocket('udp4');
+    await new Promise<void>((resolve) => socket.bind(0, resolve));
+
+    // Call with string param (old API) — should not throw
+    const result = await receiveRTPAudio(socket, 0.1, '/tmp/test-output-rtp.raw');
+    expect(result.dtmfDigits).toBe('');
+    expect(result.packetsReceived).toBe(0);
+
+    socket.close();
   });
 });

@@ -5,9 +5,10 @@
 
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 
-// Allowlist: Only these 6 tools can be registered
+// Allowlist: Only these 7 tools can be registered
 export const ALLOWED_TOOLS = [
   'sip_test',
+  'webrtc_test',
   'analyze_failure',
   'save_test',
   'load_test',

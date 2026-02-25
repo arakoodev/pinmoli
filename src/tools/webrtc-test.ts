@@ -1,34 +1,34 @@
 /**
- * SIP Test Tool
- * Executes SIP tests (OPTIONS, INVITE, REGISTER)
+ * WebRTC Test Tool
+ * Executes WebRTC voice agent tests via WHIP signaling
  */
 
 import type { AgentTool } from '@mariozechner/pi-agent-core';
-import { TestConfigSchema, type SipEvent, type TestConfig } from '../validation/schemas.js';
-import { runSipTest } from '../sip/engine.js';
+import { WebRtcTestConfigSchema, type TestEvent, type WebRtcTestConfig } from '../validation/schemas.js';
+import { runWebRtcTest } from '../webrtc/engine.js';
 
-export const sipTestTool: AgentTool = {
-  name: 'sip_test',
-  label: 'SIP Test',
-  description: `Execute a SIP test (OPTIONS, INVITE, or REGISTER).
+export const webrtcTestTool: AgentTool = {
+  name: 'webrtc_test',
+  label: 'WebRTC Test',
+  description: `Execute a WebRTC voice agent test. Connects to a WHIP endpoint,
+negotiates ICE/DTLS/SRTP, sends audio, and captures the agent's response.
 
 IMPORTANT: Before calling this tool, confirm with the user:
-1. URI: For LiveKit (*.sip.livekit.cloud), URI must contain a phone number (sip:+1XXXXXXXXXX@host). Bare host gives 404.
-2. INVITE: Confirm audio sample, sendDelay (recommend 8 for voice agents that speak first), responseWaitTime.
-3. REGISTER: Ask about auth credentials.
+1. WHIP endpoint URL (must be HTTPS, or HTTP for local dev)
+2. Bearer token (required for LiveKit, Cloudflare, etc.)
+3. Audio sample and sendDelay (recommend 5-8 for agents that speak first)
 
 Skip confirmation only if the user explicitly provided all parameters or said "use defaults".`,
-  parameters: TestConfigSchema,
-  
-  async execute(toolCallId, params, signal, onUpdate) {
-    const config = params as TestConfig;
+  parameters: WebRtcTestConfigSchema,
 
-    const events: SipEvent[] = [];
+  async execute(toolCallId, params, signal, onUpdate) {
+    const config = params as WebRtcTestConfig;
+
+    const events: TestEvent[] = [];
     const t0 = Date.now();
 
     try {
-      // Stream events as they happen
-      for await (const event of runSipTest(config)) {
+      for await (const event of runWebRtcTest(config)) {
         events.push(event);
 
         // Build verbose output lines
@@ -37,7 +37,7 @@ Skip confirmation only if the user explicitly provided all parameters or said "u
 
         lines.push(`[${event.type.toUpperCase()}] ${elapsed} ${event.message}`);
 
-        // Show raw SIP messages (request sent / response received)
+        // Show raw SDP messages
         if (event.rawMessage) {
           lines.push('  ┌──────────────────────────────────────');
           for (const line of event.rawMessage.split(/\r?\n/)) {
@@ -79,26 +79,24 @@ Skip confirmation only if the user explicitly provided all parameters or said "u
           break;
         }
       }
-      
-      // Find final status
+
+      // Build summary
       const finalEvent = events[events.length - 1];
-      const statusEvent = events.find(e => e.status);
-      
       let summary = '';
+
       if (finalEvent?.type === 'error') {
-        summary = `❌ Test failed: ${finalEvent.message}`;
+        summary = `Test failed: ${finalEvent.message}`;
         if (finalEvent.recovery) {
           summary += `\n\nRecovery: ${finalEvent.recovery}`;
         }
-      } else if (statusEvent) {
-        summary = `✓ Test successful! Server responded with ${statusEvent.status}`;
-        if (config.codecs) {
-          summary += `\nCodecs tested: ${config.codecs.join(', ')}`;
-        }
       } else {
-        summary = 'Test completed';
+        const receivedEvent = events.find(e => e.message.includes('Received') && e.message.includes('frames from agent'));
+        const sentEvent = events.find(e => e.message.includes('Sent') && e.message.includes('frames'));
+        summary = 'WebRTC test completed.';
+        if (sentEvent) summary += ` ${sentEvent.message}.`;
+        if (receivedEvent) summary += ` ${receivedEvent.message}.`;
       }
-      
+
       return {
         content: [{
           type: 'text',
@@ -106,22 +104,22 @@ Skip confirmation only if the user explicitly provided all parameters or said "u
         }],
         details: { events, config, success: finalEvent?.type !== 'error' }
       };
-      
+
     } catch (error) {
-      const errorEvent: SipEvent = {
+      const errorEvent: TestEvent = {
         type: 'error',
         timestamp: Date.now(),
         message: error instanceof Error ? error.message : String(error),
         severity: 'fatal',
-        code: 'SIP_ERROR'
+        code: 'WEBRTC_ERROR'
       };
-      
+
       events.push(errorEvent);
-      
+
       return {
         content: [{
           type: 'text',
-          text: `❌ Test failed: ${errorEvent.message}`
+          text: `Test failed: ${errorEvent.message}`
         }],
         details: { events, config, success: false }
       };

@@ -9,7 +9,7 @@ import { Type } from '@sinclair/typebox';
 export const analyzeFailureTool: AgentTool = {
   name: 'analyze_failure',
   label: 'Analyze Failure',
-  description: 'Analyze SIP test failure and provide recovery suggestions',
+  description: 'Analyze SIP or WebRTC test failure and provide recovery suggestions',
   parameters: Type.Object({
     events: Type.Array(Type.Object({
       type: Type.String(),
@@ -21,8 +21,8 @@ export const analyzeFailureTool: AgentTool = {
     }))
   }),
   
-  async execute(toolCallId, params, signal, onUpdate) {
-    const { events } = params as { events: any[] };
+  async execute(toolCallId, params, _signal, _onUpdate) {
+    const { events } = params as { events: Array<{ type: string; message: string; status?: number; severity?: string; code?: string }> };
     
     // Find error events
     const errors = events.filter(e => e.type === 'error' || e.severity === 'error' || e.severity === 'fatal');
@@ -52,8 +52,14 @@ export const analyzeFailureTool: AgentTool = {
       analysis += 'Recovery: Check network connectivity and increase timeout value.';
     } else if (error.code === 'DNS_ERROR') {
       analysis += 'Recovery: Verify the domain name is correct and DNS is working.';
+    } else if (error.code === 'WHIP_HTTP_ERROR') {
+      analysis += 'Recovery: Check WHIP endpoint URL and authentication token. Ensure the endpoint supports WHIP (RFC 9725).';
+    } else if (error.code === 'ICE_FAILED') {
+      analysis += 'Recovery: ICE connectivity failed. Check firewall/NAT settings. Try adding a TURN server to iceServers.';
+    } else if (error.code === 'DTLS_FAILED') {
+      analysis += 'Recovery: DTLS handshake failed. The remote may not support the offered fingerprint or cipher suite.';
     } else {
-      analysis += 'Recovery: Review the error message and check SIP server logs for more details.';
+      analysis += 'Recovery: Review the error message and check server logs for more details.';
     }
     
     return {

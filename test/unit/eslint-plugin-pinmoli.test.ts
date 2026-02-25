@@ -5,7 +5,7 @@
  * patterns that caused bugs so they can never recur.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it } from 'vitest';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);

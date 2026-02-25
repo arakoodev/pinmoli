@@ -43,9 +43,10 @@ export function buildSdp(options: SdpOptions): string {
     rtpmapLines.push('a=rtpmap:9 G722/8000');
   }
 
-  // Always include telephone-event
+  // Always include telephone-event (RFC 4733)
   payloadTypes.push(101);
   rtpmapLines.push('a=rtpmap:101 telephone-event/8000');
+  rtpmapLines.push('a=fmtp:101 0-15');
 
   lines.push(`m=audio ${mediaPort} RTP/AVP ${payloadTypes.join(' ')}`);
   lines.push(...rtpmapLines);

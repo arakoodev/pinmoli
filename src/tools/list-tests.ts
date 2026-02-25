@@ -12,7 +12,7 @@ export const listTestsTool: AgentTool = {
   description: 'List all saved test configurations',
   parameters: Type.Object({}),
   
-  async execute(toolCallId, params, signal, onUpdate) {
+  async execute(_toolCallId, _params, _signal, _onUpdate) {
     // TODO: Query SQLite database
     // For now, return mock data
     

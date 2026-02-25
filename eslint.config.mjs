@@ -68,6 +68,7 @@ export default [
   {
     files: [
       'src/sip/**/*.ts',
+      'src/webrtc/**/*.ts',
       'src/tools/**/*.ts',
       'src/agent/**/*.ts',
       'src/network/**/*.ts',

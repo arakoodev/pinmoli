@@ -19,8 +19,8 @@ export const saveTestTool: AgentTool = {
     config: TestConfigSchema
   }),
   
-  async execute(toolCallId, params, signal, onUpdate) {
-    const { name, config } = params as { name: string; config: any };
+  async execute(toolCallId, params, _signal, _onUpdate) {
+    const { name, config } = params as { name: string; config: Record<string, unknown> };
     
     // TODO: Save to SQLite database
     // For now, just return success

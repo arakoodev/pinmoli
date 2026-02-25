@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Pinmoli — "Postman for Voice". An AI-powered CLI for testing SIP and WebRTC voice endpoints. Point it at any SIP URI, describe what you want to test in plain English, and Pinmoli handles the protocol details — INVITE flows, codec negotiation, RTP streaming, failure analysis.
+Pinmoli — "Postman for Voice". An AI-powered CLI for testing SIP and WebRTC voice endpoints. Point it at any SIP URI or WHIP endpoint, describe what you want to test in plain English, and Pinmoli handles the protocol details — INVITE flows, WHIP signaling, codec negotiation, RTP/SRTP streaming, failure analysis.
 
 ## Commands
 
@@ -58,19 +58,22 @@ docker compose build && docker compose up -d
 - `cli.ts` — Entry point, TUI setup
 - `agent/runtime.ts` — AI agent setup (pi-agent-core, Gemini backend)
 - `ui/tui.ts` — Terminal UI (pi-tui)
-- `tools/` — 6 tool implementations (sip_test, generate_audio, analyze_failure, save_test, load_test, list_tests)
+- `tools/` — 7 tool implementations (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests)
 - `sip/engine.ts` — SIP test orchestration (async generator, yields events)
 - `sip/rtp-receiver.ts` — RTP packet build/parse/send/receive
 - `sip/audio.ts` — Audio sample resolution
 - `sip/sdp.ts` — SDP builder
 - `sip/protocol.ts` — SIP utilities
+- `webrtc/engine.ts` — WebRTC test orchestration (async generator, mirrors SIP engine)
+- `webrtc/whip.ts` — WHIP signaling client (RFC 9725: HTTP POST offer → answer)
+- `webrtc/audio-frames.ts` — PCM16 frame chunking + WAV save for WebRTC audio
 - `storage/db.ts` — SQLite + FTS5 persistence
 - `validation/schemas.ts` — Input validation (TypeBox + Zod)
 
 ### Tests (`test/`)
-- `test/unit/` — Protocol, SDP, RTP, storage, validation, tools, eslint plugin
+- `test/unit/` — Protocol, SDP, RTP, storage, validation, tools, eslint plugin, WebRTC WHIP, WebRTC engine
 - `test/integration/` — TUI flows, end-to-end, bidirectional RTP, speech, generic SIP
-- `test/live/` — Tests against real SIP endpoints (LiveKit)
+- `test/live/` — Tests against real SIP and WebRTC endpoints (LiveKit)
 
 ## Lint Rules (`eslint-plugin-pinmoli`)
 
@@ -105,6 +108,26 @@ Run `docker compose exec pinmoli npm run lint` before committing.
 3. **Fixed SIP port** — always `port: 5060` (matches Docker exposure), never random
 4. **SDP requires CRLF** — `\r\n`, not `\n`. Call `normalizeSdpLineEndings()` on user-provided SDP
 5. **Guard socket cleanup** — use `let closed = false` flag before every `socket.close()`
+
+## WebRTC / WHIP Architecture
+
+The WebRTC engine (`src/webrtc/`) mirrors the SIP engine pattern:
+
+- **Signaling**: WHIP (RFC 9725) — POST SDP offer to HTTP endpoint, get SDP answer. No vendor SDK needed.
+- **Media**: `werift` — pure TypeScript WebRTC stack (ICE/DTLS/SRTP/RTP). No native bindings, works on Alpine.
+- **Flow**: Create PeerConnection → Generate offer → WHIP POST → Set remote answer → ICE/DTLS connect → Send/receive audio → WHIP DELETE
+
+### WHIP Pre-flight Rules
+- WHIP endpoint must be HTTPS (or HTTP for local dev)
+- Bearer token required for authenticated endpoints (LiveKit, Cloudflare)
+- Default codec: opus (most WebRTC platforms prefer it)
+- Default ICE server: `stun:stun.l.google.com:19302`
+
+### WebRTC Error Codes
+- `WHIP_HTTP_ERROR` — HTTP error from WHIP endpoint (bad URL, auth, etc.)
+- `ICE_FAILED` — ICE connectivity failed (firewall/NAT). Try adding TURN server.
+- `DTLS_FAILED` — DTLS handshake failed (cipher mismatch)
+- `TIMEOUT` — Connection timeout. Voice agent may not be running.
 
 ## LiveKit SIP Troubleshooting
 

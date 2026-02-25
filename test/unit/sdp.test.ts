@@ -29,7 +29,7 @@ describe('SDP Builder', () => {
     expect(sdp).toContain('a=rtpmap:0 PCMU/8000');
   });
 
-  it('always includes telephone-event', () => {
+  it('always includes telephone-event with fmtp', () => {
     const sdp = buildSdp({
       sessionId: '123',
       sessionVersion: '456',
@@ -39,6 +39,7 @@ describe('SDP Builder', () => {
       codecs: ['opus']
     });
     expect(sdp).toContain('a=rtpmap:101 telephone-event/8000');
+    expect(sdp).toContain('a=fmtp:101 0-15');
   });
 
   it('uses correct line endings', () => {

@@ -59,7 +59,7 @@ describe('LiveKit Listen-First Mode', () => {
     expect(greetingListenEvent).toBeDefined();
 
     // Verify send phase happened after greeting phase
-    const sendEvent = events.find(e => e.message.includes('Sending audio'));
+    const _sendEvent = events.find(e => e.message.includes('Sending audio'));
     const responseListenEvent = events.find(e =>
       e.message.includes('Listening for agent response')
     );

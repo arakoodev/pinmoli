@@ -101,6 +101,48 @@ describe('TypeBox Schemas', () => {
       const result = Value.Check(TestConfigSchema, invalidConfig);
       expect(result).toBe(false);
     });
+
+    it('accepts config with dtmfDigits', () => {
+      const config = {
+        uri: 'sip:test@example.com',
+        method: 'INVITE',
+        codecs: ['opus', 'PCMU'],
+        transport: 'udp',
+        mediaPort: 10000,
+        timeout: 5000,
+        dtmfDigits: '1234#'
+      };
+
+      expect(Value.Check(TestConfigSchema, config)).toBe(true);
+    });
+
+    it('accepts dtmfDigits with A-D', () => {
+      const config = {
+        uri: 'sip:test@example.com',
+        method: 'INVITE',
+        codecs: ['PCMU'],
+        transport: 'udp',
+        mediaPort: 10000,
+        timeout: 5000,
+        dtmfDigits: '12*#ABcd'
+      };
+
+      expect(Value.Check(TestConfigSchema, config)).toBe(true);
+    });
+
+    it('rejects dtmfDigits with invalid characters', () => {
+      const config = {
+        uri: 'sip:test@example.com',
+        method: 'INVITE',
+        codecs: ['PCMU'],
+        transport: 'udp',
+        mediaPort: 10000,
+        timeout: 5000,
+        dtmfDigits: '12X'
+      };
+
+      expect(Value.Check(TestConfigSchema, config)).toBe(false);
+    });
   });
 
   describe('SipEventSchema', () => {
@@ -114,6 +156,18 @@ describe('TypeBox Schemas', () => {
 
       const result = Value.Check(SipEventSchema, validEvent);
       expect(result).toBe(true);
+    });
+
+    it('validates DTMF event', () => {
+      const dtmfEvent = {
+        type: 'dtmf',
+        timestamp: Date.now(),
+        message: 'DTMF digit sent: 5',
+        dtmfDigit: '5',
+        dtmfDuration: 1280
+      };
+
+      expect(Value.Check(SipEventSchema, dtmfEvent)).toBe(true);
     });
 
     it('validates error event with recovery', () => {

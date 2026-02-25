@@ -1,6 +1,6 @@
 # Pinmoli Tools Reference
 
-Pinmoli provides 6 tools to the AI agent for SIP/WebRTC testing. You interact with these through natural language -- the agent selects and invokes the appropriate tool based on your request.
+Pinmoli provides 7 tools to the AI agent for SIP/WebRTC testing. You interact with these through natural language -- the agent selects and invokes the appropriate tool based on your request.
 
 ## `sip_test`
 
@@ -22,6 +22,7 @@ Execute a SIP protocol test against an endpoint.
 | `auth` | object | no | -- | `{ username, password }` for REGISTER authentication |
 | `headers` | object | no | -- | Custom SIP headers (key-value pairs) |
 | `customSdp` | string | no | -- | Raw SDP to use instead of auto-generated offer |
+| `dtmfDigits` | string | no | -- | DTMF digits to send during INVITE calls: `0-9`, `*`, `#`, `A-D` |
 
 ### SIP Methods
 
@@ -39,6 +40,7 @@ Execute a SIP protocol test against an endpoint.
 "Test registration at sip:pbx.example.com with username admin password secret"
 "Call the agent with a 1000Hz tone and wait 30 seconds for response"
 "Listen for 8 seconds first, then send my greeting"
+"Call the agent and press 1234# after the greeting"
 ```
 
 ### Output
@@ -47,8 +49,58 @@ Returns a stream of SIP events:
 - Request/response messages with status codes and headers
 - SDP offer and answer details
 - RTP send/receive statistics (packet count, duration)
+- DTMF digits sent and detected (RFC 4733 telephone-event)
 - Codec negotiation results
 - Timing information for each step
+
+---
+
+## `webrtc_test`
+
+Execute a WebRTC voice agent test via WHIP signaling.
+
+### Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `whipUrl` | string | yes | -- | WHIP endpoint URL (must be HTTPS, or HTTP for local dev) |
+| `bearerToken` | string | no | -- | Bearer token for authenticated endpoints (LiveKit, Cloudflare) |
+| `codecs` | string[] | no | `["opus"]` | Codecs to offer: `opus`, `PCMU`, `PCMA`, `G722` |
+| `audioSample` | string | no | `voice-hello` | Audio to send (same samples as `sip_test`) |
+| `sendDelay` | number | no | `0` | Seconds to listen before sending audio (0-60) |
+| `responseWaitTime` | number | no | `10` | Seconds to wait for agent audio response (0-60) |
+| `timeout` | number | no | `30000` | Connection timeout in milliseconds |
+| `iceServers` | string[] | no | `["stun:stun.l.google.com:19302"]` | ICE servers (STUN/TURN URLs) |
+| `dtmfDigits` | string | no | -- | DTMF digits to send: `0-9`, `*`, `#`, `A-D` |
+
+### How it works
+
+1. Creates a local PeerConnection (werift — pure TypeScript, no native bindings)
+2. Generates an SDP offer with audio transceiver
+3. POSTs the offer to the WHIP endpoint (RFC 9725)
+4. Sets the SDP answer from the HTTP response
+5. ICE/DTLS/SRTP negotiation proceeds automatically
+6. Sends audio RTP frames from the selected sample
+7. Receives agent audio and saves as WAV
+8. Sends DTMF if `dtmfDigits` specified (RFC 4733 telephone-event)
+9. Tears down via WHIP DELETE
+
+### Examples
+
+```
+"Test the WHIP endpoint at https://example.com/whip with my bearer token"
+"Connect to the LiveKit agent via WebRTC and wait 20 seconds"
+"Send a greeting to the WHIP endpoint and press 1 after the agent responds"
+```
+
+### Output
+
+Returns a stream of test events:
+- WHIP signaling (offer/answer exchange)
+- ICE connectivity checks and DTLS handshake
+- RTP send/receive statistics
+- DTMF digits sent and detected
+- Agent audio saved as WAV file
 
 ---
 
@@ -207,6 +259,22 @@ You: INVITE sip:agent@example.com, listen for 10 seconds before sending audio, t
 You: Test sip:trunk.example.com with INVITE using only opus
 You: Now test with only PCMU
 You: Now test with both opus and PCMU
+```
+
+### WebRTC voice agent test
+
+```
+You: Test the WHIP endpoint at https://my-agent.example.com/whip with bearer token abc123
+You: Wait 10 seconds for the agent, then send my greeting
+You: Why did the ICE negotiation fail?
+```
+
+### DTMF IVR navigation
+
+```
+You: Call sip:+15551234567@trunk.example.com and press 1 after the greeting
+You: Test the agent's IVR -- send DTMF 2-3-4-# after 5 seconds
+You: Connect via WebRTC and enter PIN 1234#
 ```
 
 ### Regression testing

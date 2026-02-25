@@ -31,20 +31,22 @@ Pinmoli: Running INVITE test against sip:+15551234567@trunk.example.com...
 
 ## Features
 
-- **Natural language interface** -- describe tests in plain English, the AI agent translates to SIP protocol operations
+- **Natural language interface** -- describe tests in plain English, the AI agent translates to protocol operations
 - **Full SIP call flows** -- OPTIONS pings, INVITE with SDP offer/answer, REGISTER with auth, ACK, BYE
+- **WebRTC via WHIP** -- connect to any WHIP endpoint (LiveKit, Cloudflare, Janus), negotiate ICE/DTLS/SRTP, send and receive audio
 - **Bidirectional RTP audio** -- send pre-generated or custom speech, receive and measure agent responses
+- **DTMF send and receive (RFC 4733)** -- send telephone-event RTP packets during active calls, detect incoming DTMF from the remote side
 - **Runtime speech synthesis** -- generate custom TTS audio on the fly with espeak
 - **Failure analysis** -- pattern-matched diagnostics with actionable recovery steps
 - **Test persistence** -- save and reload test configurations (SQLite with FTS5)
-- **Works with any SIP endpoint** -- LiveKit, Daily.co, Twilio, Asterisk, FreeSWITCH, or any RFC 3261-compliant server
+- **Works with any SIP or WebRTC endpoint** -- LiveKit, Daily.co, Twilio, Cloudflare, Asterisk, FreeSWITCH, or any RFC 3261/WHIP-compliant server
 - **Runs in Docker** -- all dependencies (ffmpeg, espeak, tini) included, no local setup required
 
 ## Architecture
 
 Pinmoli is built on [pi](https://github.com/badlogic/pi-mono), the same open-source agent framework that powers [OpenClaw](https://github.com/openclaw/openclaw). Where OpenClaw uses pi to build a general-purpose personal AI assistant (messaging gateway, file operations, shell commands across 50+ integrations), Pinmoli takes the opposite approach: a **domain-restricted agent** that does exactly one thing -- SIP/WebRTC testing -- and does it well.
 
-The key difference is scope. OpenClaw embeds `pi-coding-agent` to give an LLM full access to read, write, edit, and bash tools across an entire system. Pinmoli uses only `pi-agent-core` and `pi-ai` with a locked-down tool allowlist of 6 SIP-specific tools. The LLM cannot touch the filesystem, run shell commands, or do anything outside voice protocol testing.
+The key difference is scope. OpenClaw embeds `pi-coding-agent` to give an LLM full access to read, write, edit, and bash tools across an entire system. Pinmoli uses only `pi-agent-core` and `pi-ai` with a locked-down tool allowlist of 7 voice-testing tools. The LLM cannot touch the filesystem, run shell commands, or do anything outside voice protocol testing.
 
 ### Pi libraries
 
@@ -62,7 +64,7 @@ event subscription, AbortSignal    Falls back to raw Terminal for tests
          ▼
 PinmoliAgent (src/agent/runtime.ts)
 Domain-restricted system prompt
-6-tool allowlist, event routing
+7-tool allowlist, event routing
 ```
 
 Pinmoli uses three pi packages:
@@ -97,7 +99,7 @@ User input
 │   You CANNOT edit files, run bash, or access the filesystem."    │
 │                                                                  │
 │  Tool allowlist enforced by registry (src/tools/registry.ts):    │
-│  sip_test, generate_audio, analyze_failure,                      │
+│  sip_test, webrtc_test, generate_audio, analyze_failure,         │
 │  save_test, load_test, list_tests                                │
 └──────────────────────┬───────────────────────────────────────────┘
                        │  LLM decides which tool to call
@@ -106,8 +108,9 @@ User input
 │  Tools  (src/tools/*.ts)                                         │
 │                                                                  │
 │  sip_test ─────► SIP Engine (async generator, streams events)    │
+│  webrtc_test ──► WebRTC Engine (WHIP signaling, werift stack)    │
 │  generate_audio ► ffmpeg/espeak (sine, DTMF, silence, speech)    │
-│  analyze_failure ► Pattern matching on SIP event history         │
+│  analyze_failure ► Pattern matching on event history             │
 │  save/load/list ► SQLite with FTS5 (src/storage/db.ts)           │
 └──────────────────────┬───────────────────────────────────────────┘
                        │
@@ -119,11 +122,26 @@ User input
 │                                                                  │
 │  ┌─ protocol.ts ── SIP message builder (INVITE, ACK, BYE)       │
 │  ├─ sdp.ts ─────── SDP offer/answer (opus, PCMU, PCMA, G722)    │
-│  ├─ rtp-receiver.ts ── RTP send/receive on single UDP socket     │
+│  ├─ rtp-receiver.ts ── RTP/DTMF send/receive on UDP socket      │
+│  ├─ dtmf.ts ───── RFC 4733 encode/decode, DtmfDetector          │
 │  └─ audio.ts ───── Sample resolution (WAV files, generated)      │
 │                                                                  │
 │  Yields events as they happen:                                   │
-│    SIP messages, RTP stats, diagnostics, codec negotiation       │
+│    SIP messages, RTP stats, DTMF, diagnostics, codec negotiation │
+└──────────────────────────────────────────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  WebRTC Engine  (src/webrtc/engine.ts)                           │
+│                                                                  │
+│  async function* runWebRtcTest(config): AsyncGenerator<TestEvent>│
+│                                                                  │
+│  ┌─ whip.ts ───── WHIP signaling (RFC 9725: POST offer→answer)  │
+│  ├─ audio-frames.ts ── PCM16 frame chunking + WAV save           │
+│  └─ werift ────── Pure TS WebRTC stack (ICE/DTLS/SRTP/RTP)      │
+│                                                                  │
+│  Yields events as they happen:                                   │
+│    WHIP signaling, ICE/DTLS, RTP stats, DTMF, agent audio       │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -268,12 +286,13 @@ The default `docker-compose.yml` uses `network_mode: host` so SIP and RTP traffi
 
 ## Tools
 
-Pinmoli exposes 6 tools to the AI agent. You don't call these directly -- you describe what you want and the agent picks the right tool. See [SKILLS.md](./SKILLS.md) for full parameter reference.
+Pinmoli exposes 7 tools to the AI agent. You don't call these directly -- you describe what you want and the agent picks the right tool. See [SKILLS.md](./SKILLS.md) for full parameter reference.
 
 | Tool | Purpose |
 |------|---------|
-| `sip_test` | Run OPTIONS, INVITE, or REGISTER against a SIP endpoint |
-| `generate_audio` | Create custom audio samples (sine, DTMF, silence, TTS speech) |
+| `sip_test` | Run OPTIONS, INVITE, or REGISTER against a SIP endpoint. Supports DTMF send/receive via `dtmfDigits`. |
+| `webrtc_test` | Connect to a WHIP endpoint, negotiate ICE/DTLS/SRTP, send audio, capture agent response. Supports DTMF. |
+| `generate_audio` | Create custom audio samples (sine, DTMF dual-tone, silence, TTS speech) |
 | `analyze_failure` | Diagnose a failed test and suggest fixes |
 | `save_test` | Save a test configuration by name |
 | `load_test` | Reload and run a saved test |
@@ -320,9 +339,10 @@ pinmoli/
 │   │   ├── tool-output.ts      # Collapsible tool result rendering
 │   │   └── test-terminal.ts    # Test-mode Terminal implementation
 │   ├── tools/
-│   │   ├── registry.ts         # 6-tool allowlist enforcement
+│   │   ├── registry.ts         # 7-tool allowlist enforcement
 │   │   ├── index.ts            # Tool registration
 │   │   ├── sip-test.ts         # SIP test execution (async generator)
+│   │   ├── webrtc-test.ts      # WebRTC test execution (WHIP + werift)
 │   │   ├── generate-audio.ts   # Audio generation (ffmpeg, espeak)
 │   │   ├── analyze-failure.ts  # Diagnostic pattern matching
 │   │   └── save/load/list-tests.ts
@@ -330,17 +350,22 @@ pinmoli/
 │   │   ├── engine.ts           # SIP test orchestration (async generator)
 │   │   ├── protocol.ts         # SIP message building
 │   │   ├── sdp.ts              # SDP offer/answer builder
-│   │   ├── rtp-receiver.ts     # RTP packet build/parse/send/receive
+│   │   ├── rtp-receiver.ts     # RTP/DTMF packet send/receive
+│   │   ├── dtmf.ts             # RFC 4733 encode/decode, DtmfDetector
 │   │   └── audio.ts            # Audio sample resolution
+│   ├── webrtc/
+│   │   ├── engine.ts           # WebRTC test orchestration (async generator)
+│   │   ├── whip.ts             # WHIP signaling client (RFC 9725)
+│   │   └── audio-frames.ts     # PCM16 frame chunking + WAV save
 │   ├── storage/db.ts           # SQLite + FTS5 persistence
 │   ├── validation/schemas.ts   # TypeBox schemas
 │   └── commands/service-account.ts
 ├── audio-samples/              # Pre-generated PCMU WAV files
 ├── test/
-│   ├── unit/                   # Protocol, SDP, RTP, storage, tools, lint
-│   ├── integration/            # TUI flows, e2e, bidirectional RTP
-│   └── live/                   # Tests against real SIP endpoints
-├── eslint-plugin-pinmoli.cjs   # 8 lint rules from real SIP bugs
+│   ├── unit/                   # Protocol, SDP, RTP, DTMF, storage, tools, lint, WebRTC
+│   ├── integration/            # TUI flows, e2e, bidirectional RTP, speech
+│   └── live/                   # Tests against real SIP and WebRTC endpoints
+├── eslint-plugin-pinmoli.cjs   # 10 lint rules from real bugs
 ├── Dockerfile                  # Alpine + Node 20 + ffmpeg + espeak + tini
 ├── docker-compose.yml
 └── entrypoint.sh

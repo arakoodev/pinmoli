@@ -5,8 +5,9 @@ import type { AgentTool } from '@mariozechner/pi-agent-core';
 
 describe('Tool Registry', () => {
   describe('isToolAllowed', () => {
-    it('allows SIP tools', () => {
+    it('allows SIP and WebRTC tools', () => {
       expect(isToolAllowed('sip_test')).toBe(true);
+      expect(isToolAllowed('webrtc_test')).toBe(true);
       expect(isToolAllowed('analyze_failure')).toBe(true);
       expect(isToolAllowed('save_test')).toBe(true);
       expect(isToolAllowed('load_test')).toBe(true);
@@ -65,10 +66,11 @@ describe('Tool Registry', () => {
   });
 
   describe('ALLOWED_TOOLS', () => {
-    it('contains exactly 6 SIP tools', () => {
-      expect(ALLOWED_TOOLS).toHaveLength(6);
+    it('contains exactly 7 tools', () => {
+      expect(ALLOWED_TOOLS).toHaveLength(7);
       expect(ALLOWED_TOOLS).toEqual([
         'sip_test',
+        'webrtc_test',
         'analyze_failure',
         'save_test',
         'load_test',

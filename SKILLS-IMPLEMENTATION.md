@@ -39,41 +39,45 @@
 
 **Behavior:** Background skill (not user-invocable)
 
-## Current Features (v0.1.0)
+## Current Features (v0.2.0)
 
 ### Status
 
 **Working:**
 - SIP protocol (INVITE, OPTIONS, REGISTER)
-- Audio transmission to SIP endpoints
-- Speech synthesis and custom audio generation
+- WebRTC via WHIP (RFC 9725 signaling, werift ICE/DTLS/SRTP)
+- Bidirectional RTP audio (send and receive)
+- DTMF send and receive (RFC 4733 telephone-event)
+- Speech synthesis and custom audio generation (including real dual-tone DTMF)
 - Bidirectional call flow (send audio, wait for response, hangup)
-- LiveKit integration (calls connect successfully)
+- LiveKit integration (SIP and WebRTC)
 
-**In Progress:**
-- RTP audio reception (receiving agent responses)
-- Port binding conflicts need resolution
-- Network configuration for incoming RTP packets
+### 7 Tools Available
 
-### 6 Tools Available
-
-1. **sip_test** - Execute SIP tests with speech
+1. **sip_test** - Execute SIP tests with speech and DTMF
    - OPTIONS, INVITE, REGISTER methods
    - Custom audio samples
    - Configurable response wait time (0-60s)
    - Bidirectional conversation support
-   - Sends audio to agents successfully
+   - DTMF send/receive via `dtmfDigits` parameter (RFC 4733)
 
-2. **generate_audio** - Create custom audio at runtime
+2. **webrtc_test** - Execute WebRTC voice agent tests
+   - WHIP signaling (POST offer → answer)
+   - ICE/DTLS/SRTP negotiation via werift (pure TypeScript)
+   - Bidirectional audio (send samples, receive agent response as WAV)
+   - DTMF send/receive via `dtmfDigits` parameter
+   - Bearer token auth for LiveKit, Cloudflare, etc.
+
+3. **generate_audio** - Create custom audio at runtime
    - Speech synthesis (espeak)
    - Sine wave generation
-   - DTMF tones
+   - Real dual-tone DTMF (ITU-T Q.23 frequency pairs)
    - Silence
 
-3. **analyze_failure** - Diagnose test failures
-4. **save_test** - Save test configurations
-5. **load_test** - Load saved tests
-6. **list_tests** - List all saved tests
+4. **analyze_failure** - Diagnose test failures
+5. **save_test** - Save test configurations
+6. **load_test** - Load saved tests
+7. **list_tests** - List all saved tests
 
 ### Audio Capabilities
 
@@ -91,17 +95,27 @@
 
 ### Bidirectional Conversation
 
-**Flow:**
+**SIP Flow:**
 1. INVITE → 100/180/200 → ACK
-2. Send our audio (speech) ✅
-3. Wait N seconds for agent response (configurable) ✅
-4. Receive agent's RTP audio ⚠️ (in progress)
-5. BYE → hangup ✅
+2. Listen for agent greeting (configurable `sendDelay`) ✅
+3. Send our audio (speech) ✅
+4. Send DTMF digits if specified (RFC 4733) ✅
+5. Wait N seconds for agent response ✅
+6. Receive agent's RTP audio ✅
+7. Detect incoming DTMF from agent ✅
+8. BYE → hangup ✅
+
+**WebRTC Flow:**
+1. WHIP POST offer → answer ✅
+2. ICE/DTLS/SRTP negotiation ✅
+3. Send audio via RTP ✅
+4. Send DTMF digits if specified ✅
+5. Receive agent audio, save as WAV ✅
+6. Detect incoming DTMF ✅
+7. WHIP DELETE → teardown ✅
 
 **Default wait time:** 10 seconds
 **Configurable:** 0-60 seconds via `responseWaitTime` parameter
-
-**Current Limitation:** Audio transmission works, but reception has port binding issues being debugged.
 
 ## Skill Standard Compliance
 
@@ -181,7 +195,7 @@ When user says:
 
 **What AI Learns:**
 - How to install and run Pinmoli
-- The 5 hardcoded skills (sip_test, analyze_failure, save_test, load_test, list_tests)
+- The 7 tools (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests)
 - Common workflows (test endpoint, make call, debug failure, save config)
 - Troubleshooting (agent not calling tools, socket errors, timeouts)
 - Best practices (when to use, good test requests, naming conventions)
@@ -284,8 +298,10 @@ gemini "Test sip:example.com with OPTIONS"
    - Configuration (~/.pinmoli/config.json)
    - Environment variables (ANTHROPIC_API_KEY)
 
-2. **The 5 Skills**
-   - sip_test: Execute SIP tests
+2. **The 7 Tools**
+   - sip_test: Execute SIP tests (with DTMF)
+   - webrtc_test: Execute WebRTC tests via WHIP
+   - generate_audio: Generate custom audio
    - analyze_failure: Analyze failures
    - save_test: Save configurations
    - load_test: Load configurations
@@ -316,28 +332,29 @@ gemini "Test sip:example.com with OPTIONS"
 ### Project Skill Teaches:
 
 1. **Architecture Patterns**
-   - Async generators for streaming
-   - Zod as single source of truth
+   - Async generators for streaming (SIP and WebRTC engines)
+   - TypeBox as single source of truth for schemas
    - Validation at every boundary
    - Errors as data (no exceptions)
    - Socket cleanup guards
+   - Pure-logic DTMF module (no I/O, reusable across SIP and WebRTC)
 
 2. **Critical Rules**
    - Test through TUI (never bypass)
    - Update tests atomically
    - Start minimal (YAGNI)
-   - Use Zod for validation
+   - Use TypeBox for validation
    - Guard resource cleanup
-   - 5 skills only (no dynamic registration)
+   - 7 tools only (no dynamic registration)
 
 3. **File Structure**
-   - src/ organization
-   - test/ structure
+   - src/ organization (sip/, webrtc/, tools/, ui/, storage/)
+   - test/ structure (unit/, integration/, live/)
    - Documentation files
 
 4. **Testing**
-   - 49 tests (32 unit, 17 integration)
-   - Real LiveKit endpoints
+   - 126+ unit tests, 57+ integration tests
+   - Real LiveKit endpoints (SIP and WebRTC)
    - No mocks for network testing
 
 5. **Common Tasks**

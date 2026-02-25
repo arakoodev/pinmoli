@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { PinmoliTUI } from '../../src/ui/tui.js';
 import { TestTerminal } from '../../src/ui/test-terminal.js';
-import type { Config, TestConfig } from '../../src/validation/schemas.js';
 
 /**
  * TUI-based tests for complete call flows with speech
@@ -114,7 +113,8 @@ describe('Complete Call Flow with Speech', () => {
       tui.addMessage('user', 'Make a test call to sip:test@example.com');
       tui.addMessage('assistant', 'Starting SIP INVITE test with speech');
 
-      const testConfig: TestConfig = {
+      // Config for reference — not directly used in mock flow
+      const _testConfig = {
         uri: 'sip:test@example.com',
         method: 'INVITE',
         codecs: ['opus', 'PCMU'],

@@ -14,7 +14,7 @@ export const loadTestTool: AgentTool = {
     name: Type.String({ description: 'Name of the saved test' })
   }),
   
-  async execute(toolCallId, params, signal, onUpdate) {
+  async execute(toolCallId, params, _signal, _onUpdate) {
     const { name } = params as { name: string };
     
     // TODO: Load from SQLite database

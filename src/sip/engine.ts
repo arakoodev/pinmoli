@@ -7,7 +7,8 @@ import dgram from 'dgram';
 import { generateCallId, generateTag } from './protocol.js';
 import { buildSdp } from './sdp.js';
 import { getAudioSamplePath } from './audio.js';
-import { receiveRTPAudio, saveAsWAV, sendRTPFromSocket, loadAudioSample } from './rtp-receiver.js';
+import { receiveRTPAudio, saveAsWAV, sendRTPFromSocket, sendDtmfFromSocket, loadAudioSample, type RtpStreamState } from './rtp-receiver.js';
+import { DtmfDetector } from './dtmf.js';
 import type { TestConfig, SipEvent } from '../validation/schemas.js';
 import { resolve } from 'path';
 
@@ -42,7 +43,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
       throw new Error('Invalid SIP URI format');
     }
 
-    const user = uriMatch[1]?.replace('@', '') || 'test';
+    const _user = uriMatch[1]?.replace('@', '') || 'test';
     const host = uriMatch[2];
     const port = parseInt(uriMatch[4] || '5060');
 
@@ -239,6 +240,9 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         const sendDelay = config.sendDelay ?? 0;
         const waitTime = config.responseWaitTime ?? 10;
 
+        // Shared DTMF detector for incoming digits across all phases
+        const dtmfDetector = new DtmfDetector();
+
         // ---- Phase 1: Listen for agent greeting (if sendDelay > 0) ----
         if (sendDelay > 0) {
           const greetingFile = resolve(process.cwd(), 'audio-samples', `agent-greeting-${Date.now()}.wav`);
@@ -249,7 +253,9 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
             message: `Listening for agent greeting on port ${rtpPort} (${sendDelay}s)...`
           };
 
-          const greetingResult = await receiveRTPAudio(rtpSocket, sendDelay);
+          const greetingResult = await receiveRTPAudio(rtpSocket, sendDelay, {
+            dtmfDetector,
+          });
 
           if (greetingResult.packetsReceived > 0) {
             saveAsWAV(greetingResult.audioData, greetingFile);
@@ -283,9 +289,12 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           message: `Listening for agent response on port ${rtpPort} (${waitTime}s)...`
         };
 
-        const rtpPromise = receiveRTPAudio(rtpSocket, waitTime);
+        const rtpPromise = receiveRTPAudio(rtpSocket, waitTime, {
+          dtmfDetector,
+        });
 
         // Send audio from the SAME socket (fixes port mismatch bug)
+        let audioStreamState: RtpStreamState | undefined;
         if (pcmuData) {
           yield {
             type: 'info',
@@ -293,18 +302,50 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
             message: `Sending audio (${sample}) to ${remoteIp}:${remotePort} from port ${rtpPort}`
           };
 
-          const { packetsSent } = await sendRTPFromSocket(rtpSocket, pcmuData, remoteIp, remotePort);
+          audioStreamState = await sendRTPFromSocket(rtpSocket, pcmuData, remoteIp, remotePort);
 
           yield {
             type: 'info',
             timestamp: Date.now(),
-            message: `Sent ${packetsSent} RTP packets`
+            message: `Sent ${audioStreamState.packetsSent} RTP packets`
           };
         } else {
           yield {
             type: 'info',
             timestamp: Date.now(),
             message: `Audio sample not found: ${sample} — skipping send`
+          };
+        }
+
+        // ---- Phase 2.5: Send DTMF digits (if configured) ----
+        if (config.dtmfDigits && audioStreamState) {
+          yield {
+            type: 'info',
+            timestamp: Date.now(),
+            message: `Sending DTMF digits: ${config.dtmfDigits}`
+          };
+
+          const dtmfResult = await sendDtmfFromSocket(
+            rtpSocket,
+            config.dtmfDigits,
+            remoteIp,
+            remotePort,
+            audioStreamState,
+          );
+
+          for (const digit of config.dtmfDigits) {
+            yield {
+              type: 'dtmf',
+              timestamp: Date.now(),
+              message: `Sent DTMF digit: ${digit}`,
+              dtmfDigit: digit,
+            };
+          }
+
+          yield {
+            type: 'info',
+            timestamp: Date.now(),
+            message: `Sent ${config.dtmfDigits.length} DTMF digits (${dtmfResult.packetsSent} RTP packets)`
           };
         }
 
@@ -330,6 +371,24 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
             type: 'info',
             timestamp: Date.now(),
             message: `No audio received from agent (${waitTime}s timeout)`
+          };
+        }
+
+        // ---- DTMF detection summary ----
+        if (dtmfDetector.digits) {
+          for (const det of dtmfDetector.allDetections) {
+            yield {
+              type: 'dtmf',
+              timestamp: Date.now(),
+              message: `Received DTMF digit: ${det.digit}`,
+              dtmfDigit: det.digit,
+              dtmfDuration: det.duration,
+            };
+          }
+          yield {
+            type: 'info',
+            timestamp: Date.now(),
+            message: `Detected incoming DTMF: ${dtmfDetector.digits}`
           };
         }
 

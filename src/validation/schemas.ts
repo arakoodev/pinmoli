@@ -1,13 +1,15 @@
 import { Type, Static } from '@sinclair/typebox';
 import os from 'os';
 
-// Single source of truth for SIP events
-export const SipEventSchema = Type.Object({
+// Single source of truth for test events (SIP + WebRTC)
+export const TestEventSchema = Type.Object({
   type: Type.Union([
     Type.Literal('sip'),
+    Type.Literal('webrtc'),
     Type.Literal('rtp'),
     Type.Literal('network'),
     Type.Literal('diagnostic'),
+    Type.Literal('dtmf'),
     Type.Literal('info'),
     Type.Literal('error')
   ]),
@@ -25,10 +27,17 @@ export const SipEventSchema = Type.Object({
   ])),
   code: Type.Optional(Type.String()),
   recovery: Type.Optional(Type.String()),
-  rawMessage: Type.Optional(Type.String())
+  rawMessage: Type.Optional(Type.String()),
+  dtmfDigit: Type.Optional(Type.String({ description: 'DTMF digit detected or sent (0-9, *, #, A-D)' })),
+  dtmfDuration: Type.Optional(Type.Number({ description: 'DTMF digit duration in RTP timestamp units' }))
 });
 
-export type SipEvent = Static<typeof SipEventSchema>;
+export type TestEvent = Static<typeof TestEventSchema>;
+
+/** @deprecated Use TestEvent instead */
+export type SipEvent = TestEvent;
+/** @deprecated Use TestEventSchema instead */
+export const SipEventSchema = TestEventSchema;
 
 // SIP protocol validation
 export const SipUriSchema = Type.String({
@@ -117,10 +126,71 @@ export const TestConfigSchema = Type.Object({
   })),
   customSdp: Type.Optional(Type.String({
     description: 'Raw SDP to use instead of auto-generated. Must use CRLF line endings.'
+  })),
+  dtmfDigits: Type.Optional(Type.String({
+    pattern: '^[0-9*#A-Da-d]+$',
+    description: 'DTMF digits to send during the call (RFC 4733 telephone-event). e.g. "1234#"'
   }))
 });
 
 export type TestConfig = Static<typeof TestConfigSchema>;
+
+// ICE server configuration
+export const IceServerSchema = Type.Object({
+  urls: Type.String({
+    description: 'STUN/TURN server URL',
+    examples: ['stun:stun.l.google.com:19302']
+  }),
+  username: Type.Optional(Type.String()),
+  credential: Type.Optional(Type.String()),
+});
+
+// WebRTC test configuration
+export const WebRtcTestConfigSchema = Type.Object({
+  whipEndpoint: Type.String({
+    description: 'WHIP endpoint URL (e.g. https://myproject.livekit.cloud/whip). RFC 9725.',
+    examples: ['https://myproject.livekit.cloud/whip']
+  }),
+  bearerToken: Type.Optional(Type.String({
+    description: 'Bearer token for authenticated WHIP endpoints (e.g. LiveKit participant token).'
+  })),
+  iceServers: Type.Optional(Type.Array(IceServerSchema, {
+    description: 'STUN/TURN servers. Default: stun:stun.l.google.com:19302'
+  })),
+  audioSample: Type.Optional(AudioSampleSchema),
+  sendDelay: Type.Optional(Type.Number({
+    minimum: 0,
+    maximum: 60,
+    default: 0,
+    description: 'Seconds to listen for agent greeting BEFORE sending audio. Use 5-8 for voice agents that speak first.',
+    examples: [0, 5]
+  })),
+  responseWaitTime: Type.Optional(Type.Number({
+    minimum: 0,
+    maximum: 120,
+    default: 10,
+    description: 'Seconds to listen for agent response after sending audio.',
+    examples: [10, 30]
+  })),
+  codec: Type.Optional(Type.Union([
+    Type.Literal('opus'),
+    Type.Literal('PCMU')
+  ], {
+    description: 'Audio codec. Default: opus. Most WebRTC platforms prefer opus.',
+  })),
+  timeout: Type.Optional(Type.Number({
+    minimum: 1000,
+    default: 10000,
+    description: 'ICE/DTLS connection timeout in milliseconds.',
+    examples: [10000, 30000]
+  })),
+  dtmfDigits: Type.Optional(Type.String({
+    pattern: '^[0-9*#A-Da-d]+$',
+    description: 'DTMF digits to send during the call (RFC 4733 telephone-event). e.g. "1234#"'
+  })),
+});
+
+export type WebRtcTestConfig = Static<typeof WebRtcTestConfigSchema>;
 
 // Storage path validation helper
 export function isValidStoragePath(path: string): boolean {
