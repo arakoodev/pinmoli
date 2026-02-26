@@ -203,8 +203,10 @@ export const ConfigSchema = Type.Object({
     provider: Type.Union([
       Type.Literal('anthropic'),
       Type.Literal('openai'),
+      Type.Literal('google'),
       Type.Literal('google-vertex'),
-      Type.Literal('local')
+      Type.Literal('groq'),
+      Type.Literal('openrouter'),
     ]),
     model: Type.String(),
     apiKey: Type.Optional(Type.String())

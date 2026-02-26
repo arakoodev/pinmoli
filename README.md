@@ -173,21 +173,13 @@ Pinmoli's agent can only call 7 tools, all voice-testing related. The system pro
 
 ### Quick Start (GHCR)
 
-Pull the published image and run:
+Pull the published image and run with any supported LLM provider:
 
 ```bash
 docker pull ghcr.io/arakoodev/pinmoli:latest
 ```
 
-**GCP service account (Gemini):**
-
-```bash
-docker run --rm -it --network host \
-  -v /path/to/your-key.json:/credentials.json:ro \
-  ghcr.io/arakoodev/pinmoli --service-account /credentials.json
-```
-
-**Anthropic API key:**
+**Anthropic:**
 
 ```bash
 docker run --rm -it --network host \
@@ -195,13 +187,39 @@ docker run --rm -it --network host \
   ghcr.io/arakoodev/pinmoli
 ```
 
-**OpenAI API key:**
+**OpenAI:**
 
 ```bash
 docker run --rm -it --network host \
   -e OPENAI_API_KEY=sk-... \
   ghcr.io/arakoodev/pinmoli
 ```
+
+**Google Gemini (API key):**
+
+```bash
+docker run --rm -it --network host \
+  -e GEMINI_API_KEY=... \
+  ghcr.io/arakoodev/pinmoli
+```
+
+**Google Vertex AI (service account):**
+
+```bash
+docker run --rm -it --network host \
+  -v /path/to/key.json:/credentials.json:ro \
+  ghcr.io/arakoodev/pinmoli --service-account /credentials.json
+```
+
+**Groq:**
+
+```bash
+docker run --rm -it --network host \
+  -e GROQ_API_KEY=gsk_... \
+  ghcr.io/arakoodev/pinmoli
+```
+
+The provider is auto-detected from whichever env var you set. Use `--provider` to override.
 
 The image is published automatically on every push to `main` via [GitHub Actions](./.github/workflows/docker-publish.yml). Tagged releases (`v*`) produce versioned images (e.g., `ghcr.io/arakoodev/pinmoli:0.2.0`).
 
@@ -254,37 +272,57 @@ docker compose exec pinmoli npx tsx -e "
 
 ### LLM Provider
 
-Pinmoli defaults to **Google Vertex AI (Gemini 2.5 Flash)** via pi-ai. Since pi-ai supports 20+ providers, you can swap the backend with a config change:
+Pinmoli auto-detects your LLM provider from environment variables. Set one and go:
 
-| Provider | Config value | Credentials |
-|----------|-------------|-------------|
-| Google Vertex AI | `google-vertex` (default) | Service account JSON (volume-mounted) or `GOOGLE_APPLICATION_CREDENTIALS` |
-| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` env var |
-| OpenAI | `openai` | `OPENAI_API_KEY` env var |
-
-Set credentials at startup:
+| Provider | `--provider` | Env var | Default model |
+|----------|-------------|---------|---------------|
+| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-5` |
+| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-4o` |
+| Google Gemini | `google` | `GEMINI_API_KEY` | `gemini-2.5-flash` |
+| Google Vertex AI | `google-vertex` | `--service-account <path>` | `gemini-2.5-flash` |
+| Groq | `groq` | `GROQ_API_KEY` | `llama-3.3-70b-versatile` |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4.5` |
 
 ```bash
-# docker run -- mount credentials and pass via CLI flag
-docker run --rm -it --network host \
-  -v /path/to/key.json:/credentials.json:ro \
-  ghcr.io/arakoodev/pinmoli --service-account /credentials.json
+# Just set the env var — provider is auto-detected
+ANTHROPIC_API_KEY=sk-ant-... pinmoli
 
-# docker compose -- pass flag via exec
-docker compose exec pinmoli npx tsx src/cli.ts \
-  --service-account /app/secrets/my-key.json
+# Or be explicit
+pinmoli --provider openai --model gpt-4o
 
-# Or via the TUI slash command (if the file is already mounted)
-/service-account /app/secrets/my-key.json
+# Override the default model
+pinmoli --provider anthropic --model claude-haiku-4-5
+
+# Vertex AI (service account)
+pinmoli --service-account /path/to/key.json
+
+# Switch provider at runtime via slash command
+/model anthropic claude-sonnet-4-5
+/model google gemini-2.5-pro
+/model                              # show current provider/model
+```
+
+### CLI Reference
+
+```
+pinmoli [options]
+
+  --provider <name>          LLM provider (anthropic, openai, google, google-vertex, groq, openrouter)
+  --model <id>               Model ID (default depends on provider)
+  --service-account <path>   GCP service account JSON (implies google-vertex)
+  --help                     Show usage
 ```
 
 ### Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `GOOGLE_APPLICATION_CREDENTIALS` | Path to GCP service account JSON |
-| `GOOGLE_CLOUD_PROJECT` | GCP project ID |
-| `GOOGLE_CLOUD_LOCATION` | GCP region (default: `us-central1`) |
+| Variable | Provider |
+|----------|----------|
+| `ANTHROPIC_API_KEY` | Anthropic |
+| `OPENAI_API_KEY` | OpenAI |
+| `GEMINI_API_KEY` | Google Gemini |
+| `GROQ_API_KEY` | Groq |
+| `OPENROUTER_API_KEY` | OpenRouter |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Google Vertex AI (with `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`) |
 
 ### Docker Compose
 

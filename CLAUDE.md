@@ -55,8 +55,8 @@ docker compose build && docker compose up -d
 - **pinmoli**: Node.js 20 Alpine container with ffmpeg, espeak, tini. `network_mode: host` for SIP/RTP access.
 
 ### Source (`src/`)
-- `cli.ts` — Entry point, TUI setup
-- `agent/runtime.ts` — AI agent setup (pi-agent-core, Gemini backend)
+- `cli.ts` — Entry point, CLI arg parsing, multi-provider auto-detection
+- `agent/runtime.ts` — AI agent setup (pi-agent-core, multi-provider via pi-ai)
 - `ui/tui.ts` — Terminal UI (pi-tui)
 - `tools/` — 7 tool implementations (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests)
 - `sip/engine.ts` — SIP test orchestration (async generator, yields events)
