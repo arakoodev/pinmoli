@@ -251,6 +251,9 @@ You're in. Type a test request:
 You: Send OPTIONS to sip:trunk.example.com
 You: INVITE sip:+15551234567@sip.livekit.cloud with opus and PCMU
 You: Generate speech saying "What is the weather today?" then call the agent
+You: Test with PCMA codec -- I want to verify A-law support
+You: Call the agent using G722 and wait 20 seconds for a response
+You: Call sip:+15551234567@trunk.example.com and press 1-2-3-# after the greeting
 ```
 
 ### Run without the AI agent

@@ -41,6 +41,10 @@ Execute a SIP protocol test against an endpoint.
 "Call the agent with a 1000Hz tone and wait 30 seconds for response"
 "Listen for 8 seconds first, then send my greeting"
 "Call the agent and press 1234# after the greeting"
+"Test with PCMA codec -- verify A-law support"
+"Call the agent using G722 for wideband audio"
+"Make an INVITE offering only PCMA and PCMU, no opus"
+"Call sip:pbx.example.com with G722 and send DTMF 1-2-3 after the greeting"
 ```
 
 ### Output
@@ -253,12 +257,14 @@ You: Call sip:+15551234567@sip.livekit.cloud with that audio, wait 30 seconds fo
 You: INVITE sip:agent@example.com, listen for 10 seconds before sending audio, then wait 15 seconds for reply
 ```
 
-### Codec testing matrix
+### Codec negotiation
 
 ```
-You: Test sip:trunk.example.com with INVITE using only opus
-You: Now test with only PCMU
-You: Now test with both opus and PCMU
+You: Test sip:trunk.example.com with PCMA codec
+You: Call the agent using G722 -- I want to verify wideband support
+You: Make an INVITE offering only PCMA and PCMU
+You: Test with A-law encoding against the PBX
+You: Now try with opus and PCMU, see which one the server picks
 ```
 
 ### WebRTC voice agent test
@@ -274,7 +280,16 @@ You: Why did the ICE negotiation fail?
 ```
 You: Call sip:+15551234567@trunk.example.com and press 1 after the greeting
 You: Test the agent's IVR -- send DTMF 2-3-4-# after 5 seconds
+You: Call the agent, wait for the menu prompt, then press * to go back
 You: Connect via WebRTC and enter PIN 1234#
+You: Send DTMF digits 9-1-1 during the call to test emergency routing
+```
+
+### Codec + DTMF combined
+
+```
+You: Call sip:pbx.example.com using PCMA and press 1-2-3-# after the greeting
+You: Test G722 wideband with the agent, then send DTMF 0 for operator
 ```
 
 ### Regression testing
