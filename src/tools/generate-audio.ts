@@ -3,6 +3,7 @@ import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { spawn } from 'child_process';
 import { existsSync, mkdirSync } from 'fs';
 import { resolve } from 'path';
+import { codecByName, CODEC_TABLE, type CodecInfo } from '../sip/codec.js';
 
 const GenerateAudioParamsSchema = Type.Object({
   type: Type.Union([
@@ -12,22 +13,29 @@ const GenerateAudioParamsSchema = Type.Object({
     Type.Literal('speech')
   ], { description: 'Type of audio to generate' }),
   filename: Type.String({ description: 'Output filename (without extension)' }),
-  frequency: Type.Optional(Type.Number({ 
-    minimum: 20, 
+  frequency: Type.Optional(Type.Number({
+    minimum: 20,
     maximum: 20000,
-    description: 'Frequency in Hz (for sine waves)' 
+    description: 'Frequency in Hz (for sine waves)'
   })),
-  duration: Type.Optional(Type.Number({ 
-    minimum: 0.1, 
+  duration: Type.Optional(Type.Number({
+    minimum: 0.1,
     maximum: 30,
-    description: 'Duration in seconds' 
+    description: 'Duration in seconds'
   })),
-  text: Type.Optional(Type.String({ 
-    description: 'Text to synthesize (for speech)' 
+  text: Type.Optional(Type.String({
+    description: 'Text to synthesize (for speech)'
   })),
   digits: Type.Optional(Type.String({
     pattern: '^[0-9*#A-Da-d]+$',
     description: 'DTMF digits to generate (0-9, *, #, A-D)'
+  })),
+  codec: Type.Optional(Type.Union([
+    Type.Literal('PCMU'),
+    Type.Literal('PCMA'),
+    Type.Literal('G722'),
+  ], {
+    description: 'Audio codec for the generated WAV file. Default: PCMU (mu-law 8kHz).'
   }))
 });
 
@@ -43,7 +51,8 @@ export const generateAudioTool: AgentTool = {
   parameters: GenerateAudioParamsSchema,
 
   async execute(toolCallId, params, signal, onUpdate) {
-    const { type, filename, frequency = 440, duration = 3, text, digits } = params as GenerateAudioParams;
+    const { type, filename, frequency = 440, duration = 3, text, digits, codec: codecName } = params as GenerateAudioParams;
+    const codec: CodecInfo = codecName ? (codecByName(codecName) ?? CODEC_TABLE.PCMU) : CODEC_TABLE.PCMU;
 
     // Ensure audio-samples directory exists
     const samplesDir = resolve(process.cwd(), 'audio-samples');
@@ -63,16 +72,16 @@ export const generateAudioTool: AgentTool = {
 
       switch (type) {
         case 'sine':
-          success = await generateSine(outputPath, frequency, duration);
+          success = await generateSine(outputPath, frequency, duration, codec);
           break;
         case 'dtmf':
-          success = await generateDTMF(outputPath, digits || '123', duration);
+          success = await generateDTMF(outputPath, digits || '123', duration, codec);
           break;
         case 'silence':
-          success = await generateSilence(outputPath, duration);
+          success = await generateSilence(outputPath, duration, codec);
           break;
         case 'speech':
-          success = await generateSpeech(outputPath, text || 'Hello');
+          success = await generateSpeech(outputPath, text || 'Hello', codec);
           break;
       }
 
@@ -110,11 +119,11 @@ export const generateAudioTool: AgentTool = {
   }
 };
 
-async function generateSine(output: string, frequency: number, duration: number): Promise<boolean> {
+async function generateSine(output: string, frequency: number, duration: number, codec: CodecInfo): Promise<boolean> {
   return new Promise((resolve) => {
     const ffmpeg = spawn('ffmpeg', [
       '-f', 'lavfi', '-i', `sine=frequency=${frequency}:duration=${duration}`,
-      '-acodec', 'pcm_mulaw', '-ar', '8000', '-ac', '1', '-y',
+      '-acodec', codec.ffmpegCodec, '-ar', String(codec.sampleRate), '-ac', '1', '-y',
       output
     ]);
 
@@ -133,7 +142,7 @@ const DTMF_FREQ_MAP: Record<string, [number, number]> = {
   '*': [941, 1209], '0': [941, 1336], '#': [941, 1477], 'D': [941, 1633],
 };
 
-async function generateDTMF(output: string, digits: string, _duration: number): Promise<boolean> {
+async function generateDTMF(output: string, digits: string, _duration: number, codec: CodecInfo): Promise<boolean> {
   // Build filter_complex: each digit is a dual-tone + silence gap, concatenated
   const digitDuration = 0.16; // 160ms per digit
   const gapDuration = 0.1;   // 100ms silence between digits
@@ -170,7 +179,7 @@ async function generateDTMF(output: string, digits: string, _duration: number): 
     const ffmpeg = spawn('ffmpeg', [
       '-filter_complex', filters.join(';'),
       '-map', '[out]',
-      '-acodec', 'pcm_mulaw', '-ar', '8000', '-ac', '1', '-y',
+      '-acodec', codec.ffmpegCodec, '-ar', String(codec.sampleRate), '-ac', '1', '-y',
       output
     ]);
 
@@ -181,11 +190,11 @@ async function generateDTMF(output: string, digits: string, _duration: number): 
   });
 }
 
-async function generateSilence(output: string, duration: number): Promise<boolean> {
+async function generateSilence(output: string, duration: number, codec: CodecInfo): Promise<boolean> {
   return new Promise((resolve) => {
     const ffmpeg = spawn('ffmpeg', [
       '-f', 'lavfi', '-i', `anullsrc=duration=${duration}`,
-      '-acodec', 'pcm_mulaw', '-ar', '8000', '-ac', '1', '-y',
+      '-acodec', codec.ffmpegCodec, '-ar', String(codec.sampleRate), '-ac', '1', '-y',
       output
     ]);
 
@@ -196,7 +205,7 @@ async function generateSilence(output: string, duration: number): Promise<boolea
   });
 }
 
-async function generateSpeech(output: string, text: string): Promise<boolean> {
+async function generateSpeech(output: string, text: string, codec: CodecInfo): Promise<boolean> {
   return new Promise((resolve) => {
     // Use unique temp path to avoid collisions between concurrent generations
     const tmpFile = `/tmp/speech-${Date.now()}-${process.pid}.wav`;
@@ -204,10 +213,10 @@ async function generateSpeech(output: string, text: string): Promise<boolean> {
 
     espeak.on('close', (code) => {
       if (code === 0) {
-        // Convert to PCMU
+        // Convert to target codec
         const ffmpeg = spawn('ffmpeg', [
           '-i', tmpFile,
-          '-acodec', 'pcm_mulaw', '-ar', '8000', '-ac', '1', '-y',
+          '-acodec', codec.ffmpegCodec, '-ar', String(codec.sampleRate), '-ac', '1', '-y',
           output
         ]);
         ffmpeg.on('close', (code2) => resolve(code2 === 0));

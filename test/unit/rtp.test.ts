@@ -11,6 +11,7 @@ import {
   receiveRTPAudio,
 } from '../../src/sip/rtp-receiver.js';
 import { DtmfDetector, buildDtmfPayload, DTMF_DEFAULTS } from '../../src/sip/dtmf.js';
+import { CODEC_TABLE } from '../../src/sip/codec.js';
 
 describe('buildRTPPacket', () => {
   it('creates a valid 12-byte header + payload', () => {
@@ -375,6 +376,7 @@ describe('receiveRTPAudio with DTMF detection', () => {
     const receivePromise = receiveRTPAudio(socket, 0.3, {
       dtmfDetector: detector,
       onDtmf: (d) => detectedDigits.push(d.digit),
+      acceptedPayloadTypes: [0],
     });
 
     // Send a DTMF end packet (digit '5') via a separate socket
@@ -412,6 +414,7 @@ describe('receiveRTPAudio with DTMF detection', () => {
 
     const receivePromise = receiveRTPAudio(socket, 0.3, {
       dtmfDetector: detector,
+      acceptedPayloadTypes: [0],
     });
 
     const sender = dgram.createSocket('udp4');
@@ -451,20 +454,127 @@ describe('receiveRTPAudio with DTMF detection', () => {
     const socket = dgram.createSocket('udp4');
     await new Promise<void>((resolve) => socket.bind(0, resolve));
 
-    const result = await receiveRTPAudio(socket, 0.1);
+    const result = await receiveRTPAudio(socket, 0.1, {
+      acceptedPayloadTypes: [0],
+    });
     expect(result.dtmfDigits).toBe('');
 
     socket.close();
   });
 
-  it('backward-compatible: still accepts outputFile as string', async () => {
+  it('throws when acceptedPayloadTypes is missing', async () => {
     const socket = dgram.createSocket('udp4');
     await new Promise<void>((resolve) => socket.bind(0, resolve));
 
-    // Call with string param (old API) — should not throw
-    const result = await receiveRTPAudio(socket, 0.1, '/tmp/test-output-rtp.raw');
-    expect(result.dtmfDigits).toBe('');
-    expect(result.packetsReceived).toBe(0);
+    // Calling without acceptedPayloadTypes must throw — prevents silent PCMU-only filtering
+    await expect(receiveRTPAudio(socket, 0.1)).rejects.toThrow('acceptedPayloadTypes is required');
+
+    socket.close();
+  });
+});
+
+describe('sendRTPFromSocket with codec', () => {
+  it('uses PCMA payload type and packet size', async () => {
+    const receivedPackets: Buffer[] = [];
+    const recvSocket = dgram.createSocket('udp4');
+    await new Promise<void>((resolve) => recvSocket.bind(0, resolve));
+    const port = recvSocket.address().port;
+
+    recvSocket.on('message', (msg) => receivedPackets.push(msg));
+
+    const sendSocket = dgram.createSocket('udp4');
+    await new Promise<void>((resolve) => sendSocket.bind(0, resolve));
+
+    // 160 bytes = 1 PCMA packet (20ms at 8kHz, same as PCMU)
+    const alawData = Buffer.alloc(160, 0xD5); // A-law silence
+    const result = await sendRTPFromSocket(sendSocket, alawData, '127.0.0.1', port, {
+      codec: CODEC_TABLE.PCMA,
+    });
+
+    // Wait for packet to arrive
+    await new Promise(r => setTimeout(r, 50));
+
+    expect(result.packetsSent).toBe(1);
+    expect(receivedPackets.length).toBeGreaterThanOrEqual(1);
+
+    // Verify payload type is 8 (PCMA)
+    const parsed = parseRTPPacket(receivedPackets[0]);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.payloadType).toBe(8);
+
+    sendSocket.close();
+    recvSocket.close();
+  });
+
+  it('backward-compatible: works without codec option', async () => {
+    const socket = dgram.createSocket('udp4');
+    await new Promise<void>((resolve) => socket.bind(0, resolve));
+
+    // Old API: pass initialState directly
+    const pcmu = Buffer.alloc(160, 0x7F);
+    const result = await sendRTPFromSocket(socket, pcmu, '127.0.0.1', socket.address().port, {
+      ssrc: 42,
+      sequenceNumber: 100,
+      timestamp: 8000,
+    });
+
+    expect(result.packetsSent).toBe(1);
+    expect(result.ssrc).toBe(42);
+
+    socket.close();
+  });
+});
+
+describe('receiveRTPAudio with acceptedPayloadTypes', () => {
+  it('accepts PCMA packets when configured', async () => {
+    const socket = dgram.createSocket('udp4');
+    await new Promise<void>((resolve) => socket.bind(0, resolve));
+    const port = socket.address().port;
+
+    const receivePromise = receiveRTPAudio(socket, 0.3, {
+      acceptedPayloadTypes: [8], // PCMA
+    });
+
+    const sender = dgram.createSocket('udp4');
+    await new Promise<void>((resolve) => sender.bind(0, resolve));
+
+    // Send PCMA packet (PT=8)
+    const pcmaPacket = buildRTPPacket({
+      payloadType: 8,
+      sequenceNumber: 1,
+      timestamp: 0,
+      ssrc: 200,
+      payload: Buffer.alloc(160, 0xD5),
+    });
+    sender.send(pcmaPacket, port, '127.0.0.1');
+
+    // Send PCMU packet (PT=0) — should be ignored
+    const pcmuPacket = buildRTPPacket({
+      payloadType: 0,
+      sequenceNumber: 2,
+      timestamp: 160,
+      ssrc: 200,
+      payload: Buffer.alloc(160, 0x7F),
+    });
+    sender.send(pcmuPacket, port, '127.0.0.1');
+
+    const result = await receivePromise;
+
+    expect(result.packetsReceived).toBe(1); // Only PCMA counted
+    expect(result.audioData.length).toBe(1);
+
+    sender.close();
+    socket.close();
+  });
+
+  it('throws when acceptedPayloadTypes is missing', async () => {
+    const socket = dgram.createSocket('udp4');
+    await new Promise<void>((resolve) => socket.bind(0, resolve));
+
+    // Missing acceptedPayloadTypes must throw — no silent PCMU-only default
+    await expect(receiveRTPAudio(socket, 0.3, {})).rejects.toThrow(
+      'acceptedPayloadTypes is required'
+    );
 
     socket.close();
   });

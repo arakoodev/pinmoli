@@ -11,324 +11,210 @@ This skill provides context for AI assistants working on the Pinmoli codebase.
 ## Project Context
 
 **What is Pinmoli?**
-A specialized, domain-restricted AI agent for SIP/WebRTC testing. Think "Postman with Agent Mode" but exclusively for voice protocols.
+A specialized, domain-restricted AI agent for SIP/WebRTC testing. Think "Postman with Agent Mode" but exclusively for voice protocols. Multi-provider LLM support (Anthropic, OpenAI, Gemini, Groq, OpenRouter).
 
 **Key Constraints:**
-- Exactly 5 hardcoded skills (no dynamic registration)
+- Exactly 7 tools (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests)
 - Domain-restricted to SIP/WebRTC testing only
-- No file editing outside ~/.pinmoli/
-- No bash commands except Pinmoli itself
-- Built with pi-mono libraries
+- No file editing, no bash commands -- voice protocol testing only
+- Built on pi-mono libraries (pi-agent-core, pi-ai, pi-tui)
+- ALL commands run inside Docker (no exceptions)
 
 ## Architecture
 
 ```
-TUI (src/index.ts)
-  ↓
+TUI (src/cli.ts)
+  |
+  v
+PinmoliTUI (src/ui/tui.ts) -- wraps pi-tui Terminal
+  |
+  v
 Agent Runtime (src/agent/runtime.ts)
-  - Claude 3.5 Sonnet
+  - Multi-provider via pi-ai (Anthropic, OpenAI, Gemini, Groq, OpenRouter)
   - System prompt (domain restricted)
-  ↓
-5 Skills (src/skills/index.ts)
-  - sip_test, analyze_failure, save_test, load_test, list_tests
-  ↓
-SIP Layer (src/sip/)
-  - transport.ts: UDP dgram
-  - sdp.ts: SDP builder
-  - protocol.ts: SIP utilities
-  ↓
-Storage (src/storage/db.ts)
-  - SQLite + FTS5
-  - Collections + History
+  |
+  v
+7 Tools (src/tools/)
+  - sip_test      -- SIP INVITE/OPTIONS/REGISTER
+  - webrtc_test   -- WebRTC via WHIP (RFC 9725)
+  - generate_audio -- ffmpeg/espeak audio generation
+  - analyze_failure -- Pattern-matched diagnostics
+  - save/load/list_tests -- SQLite + FTS5
+  |
+  v
+SIP Engine (src/sip/)              WebRTC Engine (src/webrtc/)
+  - engine.ts: async generator       - engine.ts: async generator
+  - protocol.ts: SIP messages        - whip.ts: WHIP signaling
+  - sdp.ts: SDP offer/answer         - audio-frames.ts: PCM16/WAV
+  - rtp-receiver.ts: RTP send/recv   - werift: pure TS WebRTC stack
+  - codec.ts: codec table/transcode
+  - dtmf.ts: RFC 4733 DTMF
+  - audio.ts: sample resolution
+  |
+  v
+Storage (src/storage/db.ts) -- SQLite + FTS5
 ```
-
-## Code Patterns
-
-### 1. Async Generators for Streaming
-
-```typescript
-export async function* executeSipTest(config: TestConfig): AsyncGenerator<SipEvent> {
-  yield { type: 'network', timestamp: Date.now(), message: 'Resolving...' };
-  // ... more events
-  yield { type: 'sip', timestamp: Date.now(), status: 200, message: '200 OK' };
-}
-```
-
-**Why:** Clean streaming, no callback hell, easy to test
-
-### 2. Zod as Single Source of Truth
-
-```typescript
-export const SipEventSchema = z.object({
-  type: z.enum(['sip', 'rtp', 'network', 'diagnostic', 'info', 'error']),
-  timestamp: z.number(),
-  message: z.string(),
-  // ...
-});
-
-export type SipEvent = z.infer<typeof SipEventSchema>;
-```
-
-**Why:** Validation + types from one definition
-
-### 3. Validation at Every Boundary
-
-```typescript
-export async function* sipTestHandler(config: TestConfig): AsyncGenerator<SipEvent> {
-  // Validate at skill boundary
-  const { TestConfigSchema } = await import('../validation/schemas.js');
-  TestConfigSchema.parse(config);
-  
-  yield* executeSipTest(config);
-}
-```
-
-**Why:** Catch errors early, fail fast
-
-### 4. Errors as Data
-
-```typescript
-// Don't throw
-yield {
-  type: 'error',
-  timestamp: Date.now(),
-  message: 'Connection timeout',
-  severity: 'fatal',
-  code: 'TIMEOUT',
-  recovery: 'Check network connectivity'
-};
-```
-
-**Why:** No exceptions, all errors are events
-
-### 5. Socket Cleanup Guards
-
-```typescript
-let socketClosed = false;
-const closeSocket = () => {
-  if (!socketClosed) {
-    socketClosed = true;
-    try {
-      socket.close();
-    } catch (e) {
-      // Socket already closed
-    }
-  }
-};
-```
-
-**Why:** Prevents "ERR_SOCKET_DGRAM_NOT_RUNNING"
-
-## Critical Rules
-
-### ✅ DO
-
-1. **Test through TUI** - Never bypass the primary interface
-2. **Update tests atomically** - Code changes + test updates together
-3. **Start minimal** - Add complexity only when needed
-4. **Use Zod for validation** - At every boundary
-5. **Stream with async generators** - For real-time events
-6. **Guard resource cleanup** - Flags for sockets
-7. **Use regex for SIP URIs** - Not URL()
-8. **Keep 5 skills only** - No dynamic registration
-
-### ❌ DON'T
-
-1. **Don't create throwaway test scripts** - Use proper tests
-2. **Don't change signatures without updating tests**
-3. **Don't over-engineer** - YAGNI principle
-4. **Don't assume API names** - Read docs first
-5. **Don't use URL() for SIP** - Use regex
-6. **Don't add more skills** - Limit is 5
-7. **Don't bypass domain restrictions** - SIP/WebRTC only
 
 ## File Structure
 
 ```
 src/
-├── index.ts              # TUI entry point
-├── system-prompt.ts      # Domain-restricted prompt
-├── agent/
-│   └── runtime.ts        # Agent initialization
-├── skills/
-│   ├── index.ts          # Tool registration (TypeBox)
-│   ├── sip-test.ts       # Async generator
-│   ├── analyzer.ts       # Failure analysis
-│   └── storage.ts        # SQLite wrappers
-├── sip/
-│   ├── transport.ts      # UDP dgram
-│   ├── sdp.ts            # SDP builder
-│   └── protocol.ts       # SIP utilities
-├── network/
-│   └── utils.ts          # IP resolution
-├── storage/
-│   └── db.ts             # SQLite + FTS5
+├── cli.ts                    # Entry point, CLI arg parsing, multi-provider
+├── agent/runtime.ts          # PinmoliAgent wraps pi-agent-core
 ├── ui/
-│   ├── manager.ts        # TUI manager
-│   ├── buffer.ts         # Circular buffer (max 1000)
-│   └── views.ts          # Timeline/SDP views
-├── config/
-│   └── loader.ts         # Config management
-└── validation/
-    └── schemas.ts        # Zod schemas
+│   ├── tui.ts                # PinmoliTUI wraps pi-tui Terminal
+│   ├── tool-output.ts        # Collapsible tool result rendering
+│   └── test-terminal.ts      # Test-mode Terminal implementation
+├── tools/
+│   ├── registry.ts           # 7-tool allowlist enforcement
+│   ├── index.ts              # Tool registration (TypeBox schemas)
+│   ├── sip-test.ts           # SIP test execution
+│   ├── webrtc-test.ts        # WebRTC test execution
+│   ├── generate-audio.ts     # Audio generation (ffmpeg, espeak)
+│   ├── analyze-failure.ts    # Diagnostic pattern matching
+│   └── save/load/list-tests.ts
+├── sip/
+│   ├── engine.ts             # SIP test orchestration (async generator)
+│   ├── protocol.ts           # SIP message building
+│   ├── sdp.ts                # SDP offer/answer builder + parseSdpAnswer()
+│   ├── rtp-receiver.ts       # RTP/DTMF send/receive/save
+│   ├── codec.ts              # CODEC_TABLE, transcoding (PCMU<->PCMA), lookup
+│   ├── dtmf.ts               # RFC 4733 encode/decode, DtmfDetector
+│   └── audio.ts              # Audio sample resolution
+├── webrtc/
+│   ├── engine.ts             # WebRTC test orchestration (async generator)
+│   ├── whip.ts               # WHIP signaling client (RFC 9725)
+│   └── audio-frames.ts       # PCM16 frame chunking + WAV save
+├── storage/db.ts             # SQLite + FTS5 persistence
+├── validation/schemas.ts     # TypeBox schemas
+└── commands/service-account.ts
 ```
+
+## Code Patterns
+
+### 1. Async Generators for Streaming
+```typescript
+export async function* runSipTest(config): AsyncGenerator<SipEvent> {
+  yield { type: 'info', message: 'Starting SIP test...' };
+  yield { type: 'sip', status: 200, message: '200 OK' };
+}
+```
+
+### 2. Required Parameters in Media Functions
+Codec params are **required** (not optional) in media functions. This is enforced by lint rule `no-optional-codec-in-media`.
+```typescript
+// CORRECT: codec is required
+export function saveAsWAV(audioData: Buffer[], outputPath: string, codec: CodecInfo): void
+export function sendRTPFromSocket(socket, host, port, audioData, codec: CodecInfo): void
+
+// WRONG: optional codec hides bugs
+export function saveAsWAV(audioData: Buffer[], outputPath: string, codec?: CodecInfo): void
+```
+
+### 3. Loud Failure over Silent Corruption
+Transcode functions must throw for unsupported codecs, not silently return input data.
+```typescript
+// CORRECT: throws for unsupported
+throw new Error(`Codec ${codec.name} transcoding not implemented`);
+
+// WRONG: silent identity return
+return pcmuData;  // silently sends wrong codec
+```
+
+### 4. Codec Negotiation Flow
+```
+SDP offer (PCMU, PCMA, G722, opus) → 200 OK with SDP answer
+→ parseSdpAnswer() extracts negotiated codec
+→ transcodePcmuTo(audioData, negotiatedCodec) before sending
+→ sendRTPFromSocket uses codec.payloadType, codec.packetSize
+→ receiveRTPAudio filters by [codec.payloadType]
+→ saveAsWAV uses codec.wavFormatCode, codec.sampleRate
+```
+
+### 5. Socket Cleanup Guards
+```typescript
+let socketClosed = false;
+const closeSocket = () => {
+  if (!socketClosed) {
+    socketClosed = true;
+    try { socket.close(); } catch (_) {}
+  }
+};
+```
+
+## Lint Rules (13 rules in eslint-plugin-pinmoli.cjs)
+
+### Protocol Correctness
+- `no-unroutable-ip-fallback` -- 0.0.0.0/127.0.0.1 in SDP creates unroutable headers
+- `no-random-sip-port` -- Math.random() for SIP port doesn't match Docker exposure
+- `require-to-tag-in-dialog` -- ACK/BYE builders must accept toTag (RFC 3261)
+- `no-hardcoded-payload-type` -- literal 0/8/9/111 in payloadType context; use codec.payloadType
+- `no-optional-codec-in-media` -- codec? or codec = default in media functions
+- `no-silent-transcode-fallback` -- transcode functions with identity fallback return
+
+### Process Safety
+- `no-console-in-lib` -- console.* in library code corrupts TUI display
+- `no-process-exit` -- process.exit() skips SIP cleanup
+- `no-shared-tmp-path` -- hardcoded /tmp/foo.ext collides under concurrency
+- `no-unabortable-spawn` -- spawn() without abort signal handling leaves orphans
+- `no-unrefed-timer-in-sip` -- setTimeout without .unref() keeps event loop alive
+
+### UI Rules
+- `no-setinterval-in-ui` -- setInterval bypasses pi-tui's render pipeline
+- `require-cursor-hide-with-loader` -- new Loader() without setShowHardwareCursor(false)
+
+## Critical Rules
+
+### DO
+1. **Run everything in Docker** -- `docker compose exec pinmoli ...` for all commands
+2. **Use codec from negotiation** -- never hardcode payload types
+3. **Make media params required** -- codec, acceptedPayloadTypes, etc.
+4. **Throw for unsupported codecs** -- no silent fallback
+5. **Guard socket cleanup** -- boolean flags before close()
+6. **Stream with async generators** -- for real-time events
+7. **Use regex for SIP URIs** -- not URL()
+
+### DON'T
+1. **Don't create throwaway test scripts** -- use proper test infrastructure
+2. **Don't change signatures without updating tests**
+3. **Don't make codec/PT params optional** -- lint rule enforces this
+4. **Don't return input data as transcode fallback** -- throw instead
+5. **Don't hardcode PT=0** -- use codec.payloadType from negotiation
+6. **Don't run commands outside Docker** -- container has ffmpeg, espeak, etc.
 
 ## Testing
 
 ```bash
-# All tests (49 tests)
-npm test
-
-# Watch mode
-npm test -- --watch
-
-# Integration tests only
-npm test test/integration/
-
-# Specific test
-npm test test/integration/livekit.test.ts
+# ALL commands run inside Docker
+docker compose exec pinmoli npx vitest run              # all tests
+docker compose exec pinmoli npx vitest run test/unit/    # unit only
+docker compose exec pinmoli npx vitest run test/integration/  # integration
+docker compose exec pinmoli npx vitest run test/live/    # live (real endpoints)
+docker compose exec pinmoli npx tsc --noEmit             # type-check
+docker compose exec pinmoli npm run lint                  # lint
 ```
 
-**Test Philosophy:**
-- 32 unit tests (fast, isolated)
-- 17 integration tests (real LiveKit endpoints)
-- No mocks for network testing
-- All tests must pass before commit
+## Adding a New Codec
 
-## Common Tasks
-
-### Adding a New Codec
-
-1. Update `CodecSchema` in `src/validation/schemas.ts`
-2. Add codec to `buildSdp()` in `src/sip/sdp.ts`
-3. Add test in `test/unit/sdp.test.ts`
-4. Update documentation
-
-### Fixing a Bug
-
-1. Write a failing test first
-2. Fix the bug
-3. Verify test passes
-4. Update documentation if needed
-
-### Adding a Feature
-
-1. Check if it fits domain restrictions (SIP/WebRTC only)
-2. Write tests first (TDD)
-3. Implement feature
-4. Update README and SKILLS.md
-5. Add to AGENTS.md learnings if relevant
+1. Add entry to `CODEC_TABLE` in `src/sip/codec.ts`
+2. Add transcoding in `transcodePcmuTo()` (or throw with clear message)
+3. Update `CodecSchema` in `src/validation/schemas.ts`
+4. Add codec to `buildSdp()` in `src/sip/sdp.ts`
+5. Add tests in `test/unit/codec.test.ts` and `test/unit/sdp.test.ts`
+6. Update documentation (README.md, SKILLS.md)
 
 ## Dependencies
 
 **Core:**
 - `@mariozechner/pi-agent-core`: Agent runtime
-- `@mariozechner/pi-ai`: LLM integration
+- `@mariozechner/pi-ai`: Multi-provider LLM abstraction
+- `@mariozechner/pi-tui`: Terminal UI with diff rendering
 - `@sinclair/typebox`: Tool schemas (required by pi-agent-core)
-- `zod`: Validation (preferred for everything else)
 - `better-sqlite3`: Storage
 - `sip`: SIP protocol
-- `dgram`: UDP sockets (built-in)
+- `werift`: Pure TypeScript WebRTC stack
 
 **Dev:**
 - `vitest`: Testing
 - `typescript`: Type checking
-- `eslint`: Linting
-
-## Known Issues
-
-### Agent Not Calling LLM
-
-**Symptom:** Agent echoes messages without executing tools
-
-**Root Cause:** LLM API not working (key, credits, network)
-
-**Fix:** Test LLM API directly first, then debug agent
-
-### Socket Cleanup Errors
-
-**Symptom:** "ERR_SOCKET_DGRAM_NOT_RUNNING"
-
-**Root Cause:** Double-closing sockets
-
-**Fix:** Use cleanup guards (already implemented)
-
-### Test Timeouts
-
-**Symptom:** Integration tests timeout
-
-**Root Cause:** Network issues or LiveKit down
-
-**Fix:** Check network, increase timeout in vitest.config.ts
-
-## Performance
-
-- **sip_test**: ~100-500ms (network dependent)
-- **analyze_failure**: <10ms (rule-based)
-- **save_test**: <5ms (SQLite)
-- **load_test**: <5ms (SQLite)
-- **list_tests**: <10ms (SQLite + FTS5)
-
-## Deployment
-
-```bash
-# Build
-npm run build
-
-# Lint
-npm run lint
-
-# Test
-npm test
-
-# Run
-node dist/index.js
-```
-
-**Requirements:**
-- Node.js 18+
-- ANTHROPIC_API_KEY environment variable
-- UDP port access (5060+)
-
-## Documentation
-
-- **README.md**: User documentation
-- **SKILLS.md**: Skills reference
-- **TESTING.md**: Test documentation
-- **AGENTS.md**: Development learnings (read this!)
-
-## LiveKit Integration
-
-**Endpoint:** `sip:5eezfwavhxe.sip.livekit.cloud`
-**Status:** ✅ Working
-- OPTIONS: 200 OK
-- INVITE: 100 Processing
-
-**Credentials in .env:**
-```
-LIVEKIT_ENDPOINT=sip:5eezfwavhxe.sip.livekit.cloud
-LIVEKIT_URL=wss://yamada-test-nklx8rpp.livekit.cloud
-LIVEKIT_API_KEY=APIEFXRYComY36X
-LIVEKIT_API_SECRET=CkSA7xaX93nannVsySOnEhkMXsSngkKwvRCe84eJH4n
-```
-
-## Key Learnings (from AGENTS.md)
-
-1. **Test through TUI first** - Biggest mistake was creating throwaway scripts
-2. **Test fundamentals first** - LLM API before agent integration
-3. **Update tests atomically** - With code changes
-4. **Start minimal** - Don't over-engineer
-5. **Read docs first** - Don't assume API names
-6. **Guard cleanup** - Flags for resource cleanup
-7. **Use correct parsers** - Regex for SIP, not URL()
-
-## When to Use This Skill
-
-This skill is automatically loaded when you're working in the Pinmoli codebase. It provides context for:
-- Understanding architecture
-- Following code patterns
-- Avoiding known mistakes
-- Writing tests
-- Debugging issues
-
-**Note:** This is a background skill (`user-invocable: false`). You won't see it in the `/` menu, but Claude will use it automatically when working on Pinmoli code.
+- `eslint`: Linting with 13 custom rules

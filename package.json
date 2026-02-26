@@ -20,6 +20,7 @@
     "@mariozechner/pi-tui": "^0.54.0",
     "@sinclair/typebox": "^0.34.0",
     "better-sqlite3": "^11.0.0",
+    "livekit-server-sdk": "^2.15.0",
     "sip": "^0.0.6",
     "werift": "^0.22.2"
   },

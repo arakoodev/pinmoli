@@ -5,9 +5,10 @@
 
 import dgram from 'dgram';
 import { generateCallId, generateTag } from './protocol.js';
-import { buildSdp } from './sdp.js';
+import { buildSdp, parseSdpAnswer } from './sdp.js';
 import { getAudioSamplePath } from './audio.js';
 import { receiveRTPAudio, saveAsWAV, sendRTPFromSocket, sendDtmfFromSocket, loadAudioSample, type RtpStreamState } from './rtp-receiver.js';
+import { transcodePcmuTo, CODEC_TABLE, type CodecInfo } from './codec.js';
 import { DtmfDetector } from './dtmf.js';
 import type { TestConfig, SipEvent } from '../validation/schemas.js';
 import { resolve } from 'path';
@@ -198,13 +199,19 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         const toTagMatch = resp.response.match(/To:[^\r\n]*;tag=([^\s;>\r\n]+)/i);
         const toTag = toTagMatch ? toTagMatch[1] : '';
 
-        // Parse SDP answer
+        // Parse SDP answer — extract negotiated codec + remote IP/port
         let remoteIp = host;
         let remotePort = config.mediaPort;
-        
+        let negotiatedCodec: CodecInfo = CODEC_TABLE.PCMU;
+
         if (resp.response.includes('Content-Type: application/sdp')) {
           const sdpMatch = resp.response.match(/v=0[\s\S]+/);
           if (sdpMatch) {
+            const sdpAnswer = parseSdpAnswer(sdpMatch[0], host, config.mediaPort);
+            remoteIp = sdpAnswer.remoteIp;
+            remotePort = sdpAnswer.remotePort;
+            negotiatedCodec = sdpAnswer.codec;
+
             yield {
               type: 'info',
               timestamp: Date.now(),
@@ -212,11 +219,11 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
               sdpAnswer: sdpMatch[0]
             };
 
-            // Extract remote IP and port from SDP
-            const cMatch = sdpMatch[0].match(/c=IN IP4 ([\d.]+)/);
-            const mMatch = sdpMatch[0].match(/m=audio (\d+)/);
-            if (cMatch) remoteIp = cMatch[1];
-            if (mMatch) remotePort = parseInt(mMatch[1]);
+            yield {
+              type: 'info',
+              timestamp: Date.now(),
+              message: `Codec negotiated: ${negotiatedCodec.name} (PT=${negotiatedCodec.payloadType}, clock=${negotiatedCodec.clockRate}Hz)`
+            };
           }
         }
 
@@ -255,10 +262,11 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
 
           const greetingResult = await receiveRTPAudio(rtpSocket, sendDelay, {
             dtmfDetector,
+            acceptedPayloadTypes: [negotiatedCodec.payloadType],
           });
 
           if (greetingResult.packetsReceived > 0) {
-            saveAsWAV(greetingResult.audioData, greetingFile);
+            saveAsWAV(greetingResult.audioData, greetingFile, negotiatedCodec);
 
             yield {
               type: 'info',
@@ -291,18 +299,22 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
 
         const rtpPromise = receiveRTPAudio(rtpSocket, waitTime, {
           dtmfDetector,
+          acceptedPayloadTypes: [negotiatedCodec.payloadType],
         });
 
         // Send audio from the SAME socket (fixes port mismatch bug)
         let audioStreamState: RtpStreamState | undefined;
         if (pcmuData) {
+          // Transcode PCMU audio to negotiated codec if needed
+          const sendData = transcodePcmuTo(pcmuData, negotiatedCodec);
+
           yield {
             type: 'info',
             timestamp: Date.now(),
-            message: `Sending audio (${sample}) to ${remoteIp}:${remotePort} from port ${rtpPort}`
+            message: `Sending audio as ${negotiatedCodec.name} (${sample}) to ${remoteIp}:${remotePort} from port ${rtpPort}`
           };
 
-          audioStreamState = await sendRTPFromSocket(rtpSocket, pcmuData, remoteIp, remotePort);
+          audioStreamState = await sendRTPFromSocket(rtpSocket, sendData, remoteIp, remotePort, { codec: negotiatedCodec });
 
           yield {
             type: 'info',
@@ -353,7 +365,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         const { packetsReceived, audioData } = await rtpPromise;
 
         if (packetsReceived > 0) {
-          saveAsWAV(audioData, responseFile);
+          saveAsWAV(audioData, responseFile, negotiatedCodec);
 
           yield {
             type: 'info',

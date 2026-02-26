@@ -1,6 +1,14 @@
 /**
- * SDP (Session Description Protocol) builder
+ * SDP (Session Description Protocol) builder and parser
  */
+
+import { codecByPayloadType, codecByName, CODEC_TABLE, type CodecInfo } from './codec.js';
+
+export interface SdpAnswerResult {
+  codec: CodecInfo;
+  remoteIp: string;
+  remotePort: number;
+}
 
 interface SdpOptions {
   sessionId: string;
@@ -53,6 +61,58 @@ export function buildSdp(options: SdpOptions): string {
   lines.push('a=sendrecv');
 
   return lines.join('\r\n') + '\r\n';
+}
+
+/**
+ * Parse an SDP answer to extract the negotiated codec, remote IP, and remote port.
+ * Reads the m=audio line for payload types, a=rtpmap lines for codec names.
+ * Skips telephone-event. Returns the first audio codec as CodecInfo.
+ * Falls back to PCMU if no recognized codec is found.
+ */
+export function parseSdpAnswer(sdp: string, fallbackIp: string, fallbackPort: number): SdpAnswerResult {
+  // Extract remote IP from c= line
+  const cMatch = sdp.match(/c=IN IP4 ([\d.]+)/);
+  const remoteIp = cMatch ? cMatch[1] : fallbackIp;
+
+  // Extract remote port from m=audio line
+  const mMatch = sdp.match(/m=audio (\d+)/);
+  const remotePort = mMatch ? parseInt(mMatch[1]) : fallbackPort;
+
+  // Parse payload types from m=audio line
+  const mLineMatch = sdp.match(/m=audio \d+ \S+ (.+)/);
+  if (!mLineMatch) {
+    return { codec: CODEC_TABLE.PCMU, remoteIp, remotePort };
+  }
+
+  const payloadTypes = mLineMatch[1].trim().split(/\s+/).map(Number);
+
+  // Build a map of PT → codec name from a=rtpmap lines
+  const rtpmapEntries: Array<{ pt: number; name: string }> = [];
+  const rtpmapRegex = /a=rtpmap:(\d+) ([^\s/]+)/g;
+  let match;
+  while ((match = rtpmapRegex.exec(sdp)) !== null) {
+    rtpmapEntries.push({ pt: parseInt(match[1]), name: match[2] });
+  }
+
+  // Walk payload types in order, find first audio codec (skip telephone-event)
+  for (const pt of payloadTypes) {
+    const rtpmap = rtpmapEntries.find(e => e.pt === pt);
+    if (rtpmap) {
+      // Skip telephone-event
+      if (rtpmap.name.toLowerCase() === 'telephone-event') continue;
+      // Try to match by name
+      const codec = codecByName(rtpmap.name);
+      if (codec) return { codec, remoteIp, remotePort };
+    } else {
+      // No rtpmap line — try well-known static PT
+      // Skip telephone-event PT (101 is common, but also check others)
+      const codec = codecByPayloadType(pt);
+      if (codec) return { codec, remoteIp, remotePort };
+    }
+  }
+
+  // Fallback to PCMU
+  return { codec: CODEC_TABLE.PCMU, remoteIp, remotePort };
 }
 
 export function normalizeSdpLineEndings(sdp: string): string {

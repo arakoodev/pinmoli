@@ -488,7 +488,178 @@ const plugin = {
     },
 
     /* ------------------------------------------------------------------ */
-    /* Rule 10 — pinmoli/require-cursor-hide-with-loader                  */
+    /* Rule 10 — pinmoli/no-hardcoded-payload-type                        */
+    /*                                                                    */
+    /* Literal payload type numbers (0, 8, 9, 111) in RTP code bypass     */
+    /* codec negotiation. When the code says payloadType: 0 or filters    */
+    /* packets with === 0, it assumes PCMU. If the SDP answer selects     */
+    /* PCMA (PT=8) or G722 (PT=9), those packets are silently dropped     */
+    /* or sent with the wrong encoding.                                   */
+    /*                                                                    */
+    /* Origin: receiveRTPAudio() defaulted acceptedPayloadTypes to [0],   */
+    /* meaning PCMA/G722 packets were silently dropped. sendRTPFromSocket  */
+    /* used payloadType: 0 instead of codec.payloadType.                  */
+    /* ------------------------------------------------------------------ */
+    'no-hardcoded-payload-type': {
+      meta: {
+        type: 'problem',
+        docs: {
+          description:
+            'Disallow literal RTP payload type numbers. ' +
+            'Use codec.payloadType from the negotiated CodecInfo instead.',
+        },
+        schema: [],
+        messages: {
+          hardcoded:
+            'Hardcoded payload type {{value}} bypasses codec negotiation. ' +
+            'Use codec.payloadType (from CODEC_TABLE or parseSdpAnswer result) instead of a literal number. ' +
+            'Hardcoded PTs silently break when the negotiated codec is not PCMU.',
+        },
+      },
+      create(context) {
+        // Known static payload types that indicate hardcoded PCMU/PCMA/G722 assumptions
+        const KNOWN_PTS = new Set([0, 8, 9, 111]);
+        return {
+          // Match: payloadType: 0, payloadType === 0, etc.
+          Literal(node) {
+            if (typeof node.value !== 'number') return;
+            if (!KNOWN_PTS.has(node.value)) return;
+
+            const parent = node.parent;
+
+            // Property assignment: { payloadType: 0 }
+            // Exclude CODEC_TABLE definitions (the source of truth)
+            if (
+              parent.type === 'Property' &&
+              parent.value === node &&
+              parent.key.type === 'Identifier' &&
+              parent.key.name === 'payloadType'
+            ) {
+              // Walk up to check if this is inside CODEC_TABLE or a codec definition object
+              if (!isInsideCodecTable(node)) {
+                context.report({ node, messageId: 'hardcoded', data: { value: node.value } });
+              }
+              return;
+            }
+
+            // Binary comparison: packet.payloadType === 0
+            if (
+              parent.type === 'BinaryExpression' &&
+              ['===', '==', '!==', '!='].includes(parent.operator)
+            ) {
+              const other = parent.left === node ? parent.right : parent.left;
+              if (
+                other.type === 'MemberExpression' &&
+                other.property.type === 'Identifier' &&
+                other.property.name === 'payloadType'
+              ) {
+                context.report({ node, messageId: 'hardcoded', data: { value: node.value } });
+                return;
+              }
+            }
+
+            // Array literal default for acceptedPayloadTypes: ?? [0]
+            if (parent.type === 'ArrayExpression' && parent.elements.length === 1) {
+              const grandparent = parent.parent;
+              // ?? [0]  or || [0]
+              if (
+                grandparent.type === 'LogicalExpression' &&
+                (grandparent.operator === '??' || grandparent.operator === '||')
+              ) {
+                // Check if left side references "acceptedPayloadTypes" or "payloadType"
+                const sourceCode = context.getSourceCode();
+                const leftText = sourceCode.getText(grandparent.left);
+                if (/payload|acceptedP/i.test(leftText)) {
+                  context.report({ node, messageId: 'hardcoded', data: { value: node.value } });
+                  return;
+                }
+              }
+            }
+          },
+        };
+      },
+    },
+
+    /* ------------------------------------------------------------------ */
+    /* Rule 11 — pinmoli/no-optional-codec-in-media                       */
+    /*                                                                    */
+    /* Making the codec parameter optional in media functions means        */
+    /* callers can silently forget to pass it. The function defaults to    */
+    /* PCMU, producing wrong WAV format codes, wrong RTP payload types,   */
+    /* or wrong transcoding for the actual negotiated codec.              */
+    /*                                                                    */
+    /* Origin: saveAsWAV(data, path, codec?) defaulted to PCMU format     */
+    /* code 7 in the WAV header. When called without codec for PCMA       */
+    /* audio, the WAV header said "mulaw" but the data was alaw.          */
+    /* receiveRTPAudio defaulted acceptedPayloadTypes to [0] (PCMU),      */
+    /* silently dropping PCMA (PT=8) and G722 (PT=9) packets.             */
+    /* ------------------------------------------------------------------ */
+    'no-optional-codec-in-media': {
+      meta: {
+        type: 'problem',
+        docs: {
+          description:
+            'Disallow optional codec parameters in media functions. ' +
+            'Codec should be required so callers must explicitly specify it.',
+        },
+        schema: [],
+        messages: {
+          optional:
+            'Optional codec parameter "{{name}}" in media function "{{fn}}". ' +
+            'Make it required — defaulting to PCMU silently produces wrong output ' +
+            'for any other negotiated codec (PCMA, G722, opus).',
+        },
+      },
+      create(context) {
+        return {
+          // Match: function declarations/expressions/arrows with ?-annotated codec param
+          FunctionDeclaration(node) { checkOptionalCodec(context, node); },
+          FunctionExpression(node) { checkOptionalCodec(context, node); },
+          ArrowFunctionExpression(node) { checkOptionalCodec(context, node); },
+        };
+      },
+    },
+
+    /* ------------------------------------------------------------------ */
+    /* Rule 12 — pinmoli/no-silent-transcode-fallback                     */
+    /*                                                                    */
+    /* Transcoding functions that handle some codecs (PCMU, PCMA, G722)   */
+    /* but return the input unchanged for others produce silent data      */
+    /* corruption. The returned buffer has the wrong encoding but the     */
+    /* RTP packet claims the correct codec PT — the peer can't decode it. */
+    /*                                                                    */
+    /* Origin: transcodePcmuTo() returned pcmuData unchanged for opus.    */
+    /* The RTP packet had PT=111 (opus) but contained mu-law audio.       */
+    /* No error, no warning. The peer got noise.                          */
+    /* ------------------------------------------------------------------ */
+    'no-silent-transcode-fallback': {
+      meta: {
+        type: 'problem',
+        docs: {
+          description:
+            'Disallow silent fallback returns in transcode/convert functions. ' +
+            'Must throw for unsupported codecs.',
+        },
+        schema: [],
+        messages: {
+          silentFallback:
+            'Transcode function "{{fn}}" has a fallback return that silently ' +
+            'passes through input data for unsupported codecs. This produces ' +
+            'audio with the wrong encoding but the correct payload type label — ' +
+            'the peer gets noise. Throw an error for unsupported codecs instead.',
+        },
+      },
+      create(context) {
+        return {
+          FunctionDeclaration(node) { checkTranscodeFallback(context, node); },
+          FunctionExpression(node) { checkTranscodeFallback(context, node); },
+          ArrowFunctionExpression(node) { checkTranscodeFallback(context, node); },
+        };
+      },
+    },
+
+    /* ------------------------------------------------------------------ */
+    /* Rule 13 — pinmoli/require-cursor-hide-with-loader                  */
     /*                                                                    */
     /* When an animated component (Loader) triggers requestRender() every */
     /* 80ms, the hardware cursor gets repositioned on each render —       */
@@ -645,6 +816,133 @@ function checkFunction(context, node) {
       data: { method: isAck ? 'ACK' : 'BYE' },
     });
   }
+}
+
+/**
+ * Check if a node is inside a CODEC_TABLE definition or similar codec constant.
+ * CODEC_TABLE is the source of truth for payload types — literal values there are correct.
+ */
+function isInsideCodecTable(node) {
+  let current = node.parent;
+  let depth = 0;
+  while (current && depth < 10) {
+    // const CODEC_TABLE = { ... }
+    if (
+      current.type === 'VariableDeclarator' &&
+      current.id.type === 'Identifier' &&
+      /CODEC|codec_table|DTMF_DEFAULTS/i.test(current.id.name)
+    ) {
+      return true;
+    }
+    // Property in an object named like a codec: PCMU: { payloadType: 0 }
+    if (
+      current.type === 'Property' &&
+      current.key.type === 'Identifier' &&
+      /^(PCMU|PCMA|G722|opus)$/i.test(current.key.name)
+    ) {
+      return true;
+    }
+    current = current.parent;
+    depth++;
+  }
+  return false;
+}
+
+/**
+ * Check if a function has an optional parameter named "codec" (TypeScript optional ?:).
+ * Only flags functions in media-related files (sip/, webrtc/, tools/).
+ */
+function checkOptionalCodec(context, node) {
+  const fn = node.id?.name || '';
+  for (const param of node.params) {
+    // TypeScript optional: param?: Type  →  AssignmentPattern is param = default
+    // In TS AST: Identifier with optional=true, or name ending with ?
+    // ESLint TS parser: param.optional === true for `codec?: CodecInfo`
+    let paramName = '';
+    let isOptional = false;
+
+    if (param.type === 'Identifier') {
+      paramName = param.name;
+      isOptional = param.optional === true;
+    }
+    // Also check AssignmentPattern: codec = CODEC_TABLE.PCMU (default value = optional)
+    if (param.type === 'AssignmentPattern' && param.left.type === 'Identifier') {
+      paramName = param.left.name;
+      isOptional = true; // has a default value → effectively optional
+    }
+
+    if (/^codec$/i.test(paramName) && isOptional) {
+      context.report({
+        node: param,
+        messageId: 'optional',
+        data: { name: paramName, fn: fn || '(anonymous)' },
+      });
+    }
+  }
+}
+
+/**
+ * Check if a transcode/convert function has a silent fallback return.
+ *
+ * Pattern detected: function transcode*(input, target) {
+ *   if (target.name === 'A') { ... return ...; }
+ *   if (target.name === 'B') { ... return ...; }
+ *   return input;  // ← FLAGGED: silent identity fallback
+ * }
+ *
+ * The last return in a function named transcode or convert that returns
+ * a parameter (first or second param name) without a preceding throw.
+ */
+function checkTranscodeFallback(context, node) {
+  const name = node.id?.name || '';
+  if (!/transcode|convert|encode|recode/i.test(name)) return;
+
+  const body = node.body;
+  if (!body || body.type !== 'BlockStatement') return;
+
+  const stmts = body.body;
+  if (stmts.length < 2) return; // too small to have the pattern
+
+  // Collect parameter names (first and second)
+  const paramNames = new Set();
+  for (const p of node.params.slice(0, 2)) {
+    if (p.type === 'Identifier') paramNames.add(p.name);
+  }
+  if (paramNames.size === 0) return;
+
+  // Find the last statement in the function body
+  const lastStmt = stmts[stmts.length - 1];
+  if (lastStmt.type !== 'ReturnStatement' || !lastStmt.argument) return;
+
+  // Check if it returns one of the input parameters (identity fallback)
+  if (
+    lastStmt.argument.type === 'Identifier' &&
+    paramNames.has(lastStmt.argument.name)
+  ) {
+    // Make sure there's at least one if-return before it (the "handled cases" pattern)
+    const hasIfReturn = stmts.some(s =>
+      s.type === 'IfStatement' &&
+      s.consequent &&
+      containsReturn(s.consequent)
+    );
+    if (hasIfReturn) {
+      context.report({
+        node: lastStmt,
+        messageId: 'silentFallback',
+        data: { fn: name },
+      });
+    }
+  }
+}
+
+/** Check if an AST node contains a ReturnStatement */
+function containsReturn(node) {
+  if (!node || typeof node !== 'object') return false;
+  if (node.type === 'ReturnStatement') return true;
+  if (node.type === 'BlockStatement') {
+    return node.body.some(s => containsReturn(s));
+  }
+  return false;
 }
 
 module.exports = plugin;

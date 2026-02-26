@@ -357,3 +357,114 @@ describe('pinmoli/require-cursor-hide-with-loader', () => {
     });
   });
 });
+
+// ---------- Rule 10: no-hardcoded-payload-type ----------
+
+describe('pinmoli/no-hardcoded-payload-type', () => {
+  it('flags literal payload types in RTP code', () => {
+    ruleTester.run('no-hardcoded-payload-type', plugin.rules['no-hardcoded-payload-type'], {
+      valid: [
+        // Using codec.payloadType (the correct pattern)
+        'const pt = codec.payloadType;',
+        'buildRTPPacket({ payloadType: codec.payloadType, sequenceNumber: 1 });',
+        // Literal 0 not in a payloadType context
+        'const x = 0;',
+        'const count = 0;',
+        // Codec table definitions (not RTP code)
+        'const PCMU = { name: "PCMU", clockRate: 8000 };',
+        // Literal in unrelated array
+        'const arr = [0, 1, 2];',
+      ],
+      invalid: [
+        // The exact pattern: hardcoded payloadType in object literal
+        {
+          code: 'buildRTPPacket({ payloadType: 0, sequenceNumber: 1 });',
+          errors: [{ messageId: 'hardcoded', data: { value: 0 } }],
+        },
+        // Hardcoded PCMA payload type
+        {
+          code: 'buildRTPPacket({ payloadType: 8 });',
+          errors: [{ messageId: 'hardcoded', data: { value: 8 } }],
+        },
+        // Comparison against hardcoded PT
+        {
+          code: 'if (packet.payloadType === 0) { handle(); }',
+          errors: [{ messageId: 'hardcoded', data: { value: 0 } }],
+        },
+      ],
+    });
+  });
+});
+
+// ---------- Rule 11: no-optional-codec-in-media ----------
+
+const tsRuleTester = new RuleTester({
+  parserOptions: { ecmaVersion: 2022, sourceType: 'module' },
+});
+
+describe('pinmoli/no-optional-codec-in-media', () => {
+  it('flags optional codec parameters in media functions', () => {
+    tsRuleTester.run('no-optional-codec-in-media', plugin.rules['no-optional-codec-in-media'], {
+      valid: [
+        // Required codec parameter (the correct pattern)
+        'function saveAsWAV(data, path, codec) { }',
+        // No codec parameter at all — fine
+        'function parseHeaders(raw) { }',
+        // Parameter named something else
+        'function transcode(data, format) { }',
+      ],
+      invalid: [
+        // The exact pattern from saveAsWAV: codec with default value
+        {
+          code: 'function saveAsWAV(data, path, codec = CODEC_TABLE.PCMU) { }',
+          errors: [{ messageId: 'optional', data: { name: 'codec', fn: 'saveAsWAV' } }],
+        },
+      ],
+    });
+  });
+});
+
+// ---------- Rule 12: no-silent-transcode-fallback ----------
+
+describe('pinmoli/no-silent-transcode-fallback', () => {
+  it('flags transcode functions with silent identity fallback', () => {
+    ruleTester.run('no-silent-transcode-fallback', plugin.rules['no-silent-transcode-fallback'], {
+      valid: [
+        // Transcode that throws for unsupported codecs (correct pattern)
+        `function transcodePcmuTo(pcmuData, targetCodec) {
+          if (targetCodec.name === 'PCMU') return pcmuData;
+          if (targetCodec.name === 'PCMA') return convert(pcmuData);
+          throw new Error('unsupported');
+        }`,
+        // Non-transcode function — not our concern
+        `function getData(input, options) {
+          if (options.fast) return input;
+          return process(input);
+        }`,
+        // Transcode without the if-return pattern
+        `function transcodePcmuTo(pcmuData, targetCodec) {
+          return convert(pcmuData, targetCodec);
+        }`,
+      ],
+      invalid: [
+        // The exact pattern from codec.ts: identity fallback for unsupported codecs
+        {
+          code: `function transcodePcmuTo(pcmuData, targetCodec) {
+            if (targetCodec.name === 'PCMU') return pcmuData;
+            if (targetCodec.name === 'PCMA') return convert(pcmuData);
+            return pcmuData;
+          }`,
+          errors: [{ messageId: 'silentFallback', data: { fn: 'transcodePcmuTo' } }],
+        },
+        // Any convert function with the same pattern
+        {
+          code: `function convertAudio(input, codec) {
+            if (codec === 'wav') return toWav(input);
+            return input;
+          }`,
+          errors: [{ messageId: 'silentFallback', data: { fn: 'convertAudio' } }],
+        },
+      ],
+    });
+  });
+});

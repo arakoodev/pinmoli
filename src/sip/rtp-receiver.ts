@@ -1,5 +1,6 @@
 import dgram from 'dgram';
-import { writeFileSync, readFileSync, existsSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'fs';
+import { execFileSync } from 'child_process';
 import {
   DTMF_EVENT_MAP,
   DTMF_DEFAULTS,
@@ -7,6 +8,7 @@ import {
   DtmfDetector,
   type DtmfDetection,
 } from './dtmf.js';
+import { CODEC_TABLE, type CodecInfo } from './codec.js';
 
 /**
  * RTP packet structure
@@ -117,22 +119,41 @@ export interface RtpStreamState {
   timestamp: number;
 }
 
+/** Options for sendRTPFromSocket */
+export interface SendRtpOptions {
+  initialState?: Partial<Pick<RtpStreamState, 'ssrc' | 'sequenceNumber' | 'timestamp'>>;
+  codec?: CodecInfo;
+}
+
 /**
  * Send RTP packets from an existing dgram socket at 20ms intervals.
- * Uses PCMU (PT=0): 160 bytes per packet = 20ms at 8kHz.
+ * Default: PCMU (PT=0, 160 bytes/packet, 8kHz clock).
+ * Pass a codec to use its payloadType, packetSize, and clockRate.
  *
  * Accepts optional initial state for SSRC/seq/ts continuity (e.g. for DTMF after audio).
  * Returns final stream state so callers can continue the stream.
  */
 export function sendRTPFromSocket(
   socket: dgram.Socket,
-  pcmuData: Buffer,
+  audioData: Buffer,
   remoteIp: string,
   remotePort: number,
-  initialState?: Partial<Pick<RtpStreamState, 'ssrc' | 'sequenceNumber' | 'timestamp'>>
+  initialStateOrOptions?: Partial<Pick<RtpStreamState, 'ssrc' | 'sequenceNumber' | 'timestamp'>> | SendRtpOptions,
 ): Promise<RtpStreamState> {
+  // Resolve overloaded param: plain initialState object vs SendRtpOptions
+  let initialState: Partial<Pick<RtpStreamState, 'ssrc' | 'sequenceNumber' | 'timestamp'>> | undefined;
+  let codec: CodecInfo = CODEC_TABLE.PCMU;
+
+  if (initialStateOrOptions && 'codec' in initialStateOrOptions) {
+    const opts = initialStateOrOptions as SendRtpOptions;
+    initialState = opts.initialState;
+    if (opts.codec) codec = opts.codec;
+  } else {
+    initialState = initialStateOrOptions as Partial<Pick<RtpStreamState, 'ssrc' | 'sequenceNumber' | 'timestamp'>> | undefined;
+  }
+
   return new Promise((resolve) => {
-    if (pcmuData.length === 0) {
+    if (audioData.length === 0) {
       resolve({
         packetsSent: 0,
         ssrc: initialState?.ssrc ?? 0,
@@ -142,7 +163,8 @@ export function sendRTPFromSocket(
       return;
     }
 
-    const PACKET_SIZE = 160; // 20ms at 8kHz
+    const packetSize = codec.packetSize;
+    const timestampIncrement = codec.clockRate / 50; // 20ms = 1/50th of a second
     const ssrc = initialState?.ssrc ?? ((Math.random() * 0xFFFFFFFF) >>> 0);
     let sequenceNumber = initialState?.sequenceNumber ?? ((Math.random() * 0xFFFF) >>> 0);
     let timestamp = initialState?.timestamp ?? ((Math.random() * 0xFFFFFFFF) >>> 0);
@@ -151,17 +173,17 @@ export function sendRTPFromSocket(
     let isFirst = !initialState; // only mark first if starting fresh
 
     const interval = setInterval(() => {
-      if (offset >= pcmuData.length) {
+      if (offset >= audioData.length) {
         clearInterval(interval);
         resolve({ packetsSent, ssrc, sequenceNumber, timestamp });
         return;
       }
 
-      const end = Math.min(offset + PACKET_SIZE, pcmuData.length);
-      const payload = pcmuData.slice(offset, end);
+      const end = Math.min(offset + packetSize, audioData.length);
+      const payload = audioData.slice(offset, end);
 
       const packet = buildRTPPacket({
-        payloadType: 0, // PCMU
+        payloadType: codec.payloadType,
         sequenceNumber,
         timestamp,
         ssrc,
@@ -177,7 +199,7 @@ export function sendRTPFromSocket(
       isFirst = false;
       offset = end;
       sequenceNumber = (sequenceNumber + 1) & 0xFFFF;
-      timestamp = (timestamp + PACKET_SIZE) >>> 0;
+      timestamp = (timestamp + timestampIncrement) >>> 0;
     }, 20);
   });
 }
@@ -278,11 +300,14 @@ export function sendDtmfFromSocket(
 export interface ReceiveRtpOptions {
   dtmfDetector?: DtmfDetector;
   onDtmf?: (detection: DtmfDetection) => void;
+  /** Payload types to accept as audio. Default: [0] (PCMU only). */
+  acceptedPayloadTypes?: number[];
 }
 
 /**
  * Receive RTP audio on an existing socket.
  * Optionally detects DTMF via DtmfDetector (feeds PT 101 packets).
+ * Filters audio packets by acceptedPayloadTypes (default: [0] for PCMU).
  */
 export async function receiveRTPAudio(
   socket: dgram.Socket,
@@ -299,6 +324,14 @@ export async function receiveRTPAudio(
   } else if (outputFileOrOptions && typeof outputFileOrOptions === 'object') {
     opts = outputFileOrOptions;
   }
+
+  if (!opts?.acceptedPayloadTypes || opts.acceptedPayloadTypes.length === 0) {
+    throw new Error(
+      'acceptedPayloadTypes is required — pass [codec.payloadType] from the negotiated codec. ' +
+      'Omitting it would silently drop all non-PCMU packets.'
+    );
+  }
+  const acceptedPTs = new Set(opts.acceptedPayloadTypes);
 
   return new Promise((resolve) => {
     const audioData: Buffer[] = [];
@@ -317,8 +350,8 @@ export async function receiveRTPAudio(
         }
       }
 
-      // Only accumulate PCMU audio
-      if (packet.payloadType === 0) {
+      // Accumulate audio matching accepted payload types
+      if (acceptedPTs.has(packet.payloadType)) {
         audioData.push(packet.payload);
         packetsReceived++;
       }
@@ -347,12 +380,30 @@ export async function receiveRTPAudio(
 }
 
 /**
- * Save RTP audio as WAV file
+ * Save RTP audio as WAV file.
+ * For PCMU (format 7) and PCMA (format 6): writes standard WAV with correct format code.
+ * For G722 (no standard WAV code): saves raw data, then decodes via ffmpeg to PCM WAV.
  */
-export function saveAsWAV(audioData: Buffer[], outputPath: string): void {
+export function saveAsWAV(audioData: Buffer[], outputPath: string, codec: CodecInfo): void {
   const combinedAudio = Buffer.concat(audioData);
+  const c = codec;
 
-  // WAV header for PCMU 8kHz mono
+  // G722 has no standard WAV format code — save raw, decode via ffmpeg
+  if (c.wavFormatCode === 0xFFFF) {
+    const tmpRaw = `/tmp/pinmoli-save-${Date.now()}-${process.pid}.raw`;
+    try {
+      writeFileSync(tmpRaw, combinedAudio);
+      execFileSync('ffmpeg', [
+        '-f', c.ffmpegCodec, '-ar', String(c.sampleRate), '-ac', '1', '-i', tmpRaw,
+        '-acodec', 'pcm_s16le', '-ar', String(c.sampleRate), '-ac', '1', '-y', outputPath,
+      ], { stdio: 'pipe', timeout: 10000 });
+    } finally {
+      try { unlinkSync(tmpRaw); } catch { /* ignore */ }
+    }
+    return;
+  }
+
+  // Standard WAV with known format code (PCMU=7, PCMA=6)
   const wavHeader = Buffer.alloc(44);
 
   // RIFF header
@@ -363,10 +414,10 @@ export function saveAsWAV(audioData: Buffer[], outputPath: string): void {
   // fmt chunk
   wavHeader.write('fmt ', 12);
   wavHeader.writeUInt32LE(16, 16); // chunk size
-  wavHeader.writeUInt16LE(7, 20); // format (7 = PCMU)
+  wavHeader.writeUInt16LE(c.wavFormatCode, 20); // format code
   wavHeader.writeUInt16LE(1, 22); // channels
-  wavHeader.writeUInt32LE(8000, 24); // sample rate
-  wavHeader.writeUInt32LE(8000, 28); // byte rate
+  wavHeader.writeUInt32LE(c.sampleRate, 24); // sample rate
+  wavHeader.writeUInt32LE(c.sampleRate, 28); // byte rate (1 byte per sample for mulaw/alaw)
   wavHeader.writeUInt16LE(1, 32); // block align
   wavHeader.writeUInt16LE(8, 34); // bits per sample
 

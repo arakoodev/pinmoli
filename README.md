@@ -395,6 +395,7 @@ pinmoli/
 │   │   ├── protocol.ts         # SIP message building
 │   │   ├── sdp.ts              # SDP offer/answer builder
 │   │   ├── rtp-receiver.ts     # RTP/DTMF packet send/receive
+│   │   ├── codec.ts            # Codec table, transcoding (PCMU↔PCMA), lookup
 │   │   ├── dtmf.ts             # RFC 4733 encode/decode, DtmfDetector
 │   │   └── audio.ts            # Audio sample resolution
 │   ├── webrtc/
@@ -409,7 +410,7 @@ pinmoli/
 │   ├── unit/                   # Protocol, SDP, RTP, DTMF, storage, tools, lint, WebRTC
 │   ├── integration/            # TUI flows, e2e, bidirectional RTP, speech
 │   └── live/                   # Tests against real SIP and WebRTC endpoints
-├── eslint-plugin-pinmoli.cjs   # 10 lint rules from real bugs
+├── eslint-plugin-pinmoli.cjs   # 13 lint rules from real bugs
 ├── Dockerfile                  # Alpine + Node 20 + ffmpeg + espeak + tini
 ├── docker-compose.yml
 └── entrypoint.sh
