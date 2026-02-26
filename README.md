@@ -162,7 +162,7 @@ This design makes the engine usable outside the TUI too -- pipe events to NDJSON
 
 General-purpose agents (like OpenClaw) give the LLM access to bash, file I/O, and the full system. That power makes sense for a personal assistant. For a SIP testing tool, it's a liability -- you don't want an LLM accidentally `rm -rf`-ing your project while trying to debug a codec mismatch.
 
-Pinmoli's agent can only call 6 tools, all SIP-related. The system prompt explicitly forbids filesystem access, and the tool registry enforces the allowlist at runtime. The LLM stays in its lane.
+Pinmoli's agent can only call 7 tools, all voice-testing related. The system prompt explicitly forbids filesystem access, and the tool registry enforces the allowlist at runtime. The LLM stays in its lane.
 
 ## Quick Start
 
@@ -171,16 +171,20 @@ Pinmoli's agent can only call 6 tools, all SIP-related. The system prompt explic
 - Docker
 - An LLM provider credential (GCP service account key for Gemini, or an API key for Anthropic/OpenAI)
 
-### Quick Start (DockerHub)
+### Quick Start (GHCR)
 
 Pull the published image and run:
+
+```bash
+docker pull ghcr.io/arakoodev/pinmoli:latest
+```
 
 **GCP service account (Gemini):**
 
 ```bash
 docker run --rm -it --network host \
   -v /path/to/your-key.json:/credentials.json:ro \
-  pinmoli/pinmoli --service-account /credentials.json
+  ghcr.io/arakoodev/pinmoli --service-account /credentials.json
 ```
 
 **Anthropic API key:**
@@ -188,7 +192,7 @@ docker run --rm -it --network host \
 ```bash
 docker run --rm -it --network host \
   -e ANTHROPIC_API_KEY=sk-ant-... \
-  pinmoli/pinmoli
+  ghcr.io/arakoodev/pinmoli
 ```
 
 **OpenAI API key:**
@@ -196,8 +200,10 @@ docker run --rm -it --network host \
 ```bash
 docker run --rm -it --network host \
   -e OPENAI_API_KEY=sk-... \
-  pinmoli/pinmoli
+  ghcr.io/arakoodev/pinmoli
 ```
+
+The image is published automatically on every push to `main` via [GitHub Actions](./.github/workflows/docker-publish.yml). Tagged releases (`v*`) produce versioned images (e.g., `ghcr.io/arakoodev/pinmoli:0.2.0`).
 
 ### Development
 
@@ -262,7 +268,7 @@ Set credentials at startup:
 # docker run -- mount credentials and pass via CLI flag
 docker run --rm -it --network host \
   -v /path/to/key.json:/credentials.json:ro \
-  pinmoli/pinmoli --service-account /credentials.json
+  ghcr.io/arakoodev/pinmoli --service-account /credentials.json
 
 # docker compose -- pass flag via exec
 docker compose exec pinmoli npx tsx src/cli.ts \
@@ -432,7 +438,7 @@ docker compose exec pinmoli ls -la /app/secrets/my-key.json
 # Or pass credentials via environment variable
 docker run --rm -it --network host \
   -e ANTHROPIC_API_KEY=sk-ant-... \
-  pinmoli/pinmoli
+  ghcr.io/arakoodev/pinmoli
 ```
 
 ## Contributing
