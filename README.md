@@ -245,15 +245,80 @@ The source directory is bind-mounted, so code changes are reflected immediately.
 
 ### Try it
 
-You're in. Type a test request:
+You're in. Type a test request. Every example below has a corresponding integration test in `test/integration/readme-prompts.test.ts`.
+
+**SIP basics:**
 
 ```
 You: Send OPTIONS to sip:trunk.example.com
 You: INVITE sip:+15551234567@sip.livekit.cloud with opus and PCMU
-You: Generate speech saying "What is the weather today?" then call the agent
+You: Register at sip:pbx.example.com with username admin password secret
+```
+
+**Codec negotiation:**
+
+```
 You: Test with PCMA codec -- I want to verify A-law support
 You: Call the agent using G722 and wait 20 seconds for a response
+You: Test sip:pbx.example.com offering only PCMA and PCMU, see which it picks
+```
+
+**DTMF and IVR navigation:**
+
+```
 You: Call sip:+15551234567@trunk.example.com and press 1-2-3-# after the greeting
+You: Call sip:+18005551234@trunk.example.com, press 1 for sales, then 0 for operator
+You: Connect via WebRTC to https://agent.example.com/whip and enter PIN 1234#
+```
+
+**Speech generation:**
+
+```
+You: Generate speech saying "What is the weather today?" then call the agent
+You: Generate a 1000Hz sine wave for 5 seconds, then test the endpoint
+You: Make the greeting say "Por favor espere" in Spanish, then test
+```
+
+**Bidirectional conversations:**
+
+```
+You: Call sip:agent@example.com, listen for 5 seconds first, then send my greeting
+You: INVITE sip:agent@livekit.cloud, send the greeting, wait 30 seconds for a response
+```
+
+**WebRTC:**
+
+```
+You: Test the WHIP endpoint at https://my-agent.example.com/whip with bearer token abc123
+```
+
+**Failure analysis:**
+
+```
+You: Why did it fail?
+You: What went wrong? (after a 488 codec mismatch)
+```
+
+**Save, load, and batch:**
+
+```
+You: Save this test as "production-health-check"
+You: Show me all saved tests, then run one
+You: Compare sip:trunk-us.example.com and sip:trunk-eu.example.com
+You: Test these servers: sip:a.example.com, sip:b.example.com, sip:c.example.com
+```
+
+**Troubleshooting:**
+
+```
+You: Try again with 15 second timeout
+```
+
+**Advanced combos:**
+
+```
+You: Generate speech "Hello, I need billing support", call with PCMA, then press 2 for billing
+You: Test sip:agent@broken-trunk.com, analyze the failure, fix it with TCP, save the config
 ```
 
 ### Run without the AI agent
