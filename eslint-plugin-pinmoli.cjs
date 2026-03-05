@@ -659,7 +659,115 @@ const plugin = {
     },
 
     /* ------------------------------------------------------------------ */
-    /* Rule 13 — pinmoli/require-cursor-hide-with-loader                  */
+    /* Rule 13 — pinmoli/no-incomplete-enum-description                   */
+    /*                                                                    */
+    /* TypeBox Type.Union descriptions are the primary way the LLM learns */
+    /* what values a tool parameter accepts. If the description mentions  */
+    /* only a subset of the union's Literal values, the LLM rejects the  */
+    /* rest — even though the schema technically allows them.             */
+    /*                                                                    */
+    /* Origin: CodecSchema was Type.Union([Literal('opus'),               */
+    /* Literal('PCMU'), Literal('PCMA'), Literal('G722')]) but the       */
+    /* description said "opus and PCMU". The LLM responded "I cannot run  */
+    /* the test with g722 — the tool only supports opus and PCMU."        */
+    /* ------------------------------------------------------------------ */
+    'no-incomplete-enum-description': {
+      meta: {
+        type: 'problem',
+        docs: {
+          description:
+            'Require TypeBox Union descriptions to mention all Literal values. ' +
+            'The LLM reads descriptions to determine valid tool inputs.',
+        },
+        schema: [],
+        messages: {
+          incomplete:
+            'Type.Union description is missing values: {{missing}}. ' +
+            'The LLM reads description text (not schema definitions) to determine valid inputs. ' +
+            'When a description mentions only a subset of values, the LLM rejects the rest.',
+        },
+      },
+      create(context) {
+        return {
+          CallExpression(node) {
+            // Match: Type.Union([Type.Literal(...), ...], { description: '...' })
+            const callee = node.callee;
+            if (
+              callee.type !== 'MemberExpression' ||
+              callee.object.type !== 'Identifier' ||
+              callee.object.name !== 'Type' ||
+              callee.property.type !== 'Identifier' ||
+              callee.property.name !== 'Union'
+            ) return;
+
+            const args = node.arguments;
+            if (args.length < 2) return;
+
+            const arrayArg = args[0];
+            const optionsArg = args[1];
+
+            if (arrayArg.type !== 'ArrayExpression') return;
+            if (optionsArg.type !== 'ObjectExpression') return;
+
+            // Extract literal string values from Type.Literal('value') calls
+            const literalValues = [];
+            for (const element of arrayArg.elements) {
+              if (
+                element &&
+                element.type === 'CallExpression' &&
+                element.callee.type === 'MemberExpression' &&
+                element.callee.object.type === 'Identifier' &&
+                element.callee.object.name === 'Type' &&
+                element.callee.property.type === 'Identifier' &&
+                element.callee.property.name === 'Literal' &&
+                element.arguments.length >= 1 &&
+                element.arguments[0].type === 'Literal' &&
+                typeof element.arguments[0].value === 'string'
+              ) {
+                literalValues.push(element.arguments[0].value);
+              }
+            }
+
+            // Need at least 2 values for an incomplete description to matter
+            if (literalValues.length < 2) return;
+
+            // Find description property in options object
+            const descProp = optionsArg.properties.find(p =>
+              p.type === 'Property' &&
+              p.key.type === 'Identifier' &&
+              p.key.name === 'description'
+            );
+
+            if (!descProp) return;
+
+            // Get description text from string literal or concatenation
+            let descText = '';
+            if (descProp.value.type === 'Literal' && typeof descProp.value.value === 'string') {
+              descText = descProp.value.value;
+            } else if (descProp.value.type === 'BinaryExpression' && descProp.value.operator === '+') {
+              descText = extractConcatenatedString(descProp.value);
+            }
+
+            if (!descText) return;
+
+            // Check which literal values are missing from the description (case-insensitive)
+            const descLower = descText.toLowerCase();
+            const missing = literalValues.filter(v => !descLower.includes(v.toLowerCase()));
+
+            if (missing.length > 0) {
+              context.report({
+                node: descProp.value,
+                messageId: 'incomplete',
+                data: { missing: missing.join(', ') },
+              });
+            }
+          },
+        };
+      },
+    },
+
+    /* ------------------------------------------------------------------ */
+    /* Rule 14 — pinmoli/require-cursor-hide-with-loader                */
     /*                                                                    */
     /* When an animated component (Loader) triggers requestRender() every */
     /* 80ms, the hardware cursor gets repositioned on each render —       */
@@ -933,6 +1041,22 @@ function checkTranscodeFallback(context, node) {
       });
     }
   }
+}
+
+/**
+ * Extract a string from a BinaryExpression chain of string concatenations.
+ * Handles: 'foo' + 'bar' + 'baz' → 'foobarbaz'
+ */
+function extractConcatenatedString(node) {
+  if (node.type === 'Literal' && typeof node.value === 'string') {
+    return node.value;
+  }
+  if (node.type === 'BinaryExpression' && node.operator === '+') {
+    const left = extractConcatenatedString(node.left);
+    const right = extractConcatenatedString(node.right);
+    if (left !== null && right !== null) return left + right;
+  }
+  return null;
 }
 
 /** Check if an AST node contains a ReturnStatement */

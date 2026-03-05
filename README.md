@@ -183,6 +183,7 @@ docker pull ghcr.io/arakoodev/pinmoli:latest
 
 ```bash
 docker run --rm -it --network host \
+  -v $(pwd)/captures:/app/captures \
   -e ANTHROPIC_API_KEY=sk-ant-... \
   ghcr.io/arakoodev/pinmoli
 ```
@@ -191,6 +192,7 @@ docker run --rm -it --network host \
 
 ```bash
 docker run --rm -it --network host \
+  -v $(pwd)/captures:/app/captures \
   -e OPENAI_API_KEY=sk-... \
   ghcr.io/arakoodev/pinmoli
 ```
@@ -199,6 +201,7 @@ docker run --rm -it --network host \
 
 ```bash
 docker run --rm -it --network host \
+  -v $(pwd)/captures:/app/captures \
   -e GEMINI_API_KEY=... \
   ghcr.io/arakoodev/pinmoli
 ```
@@ -207,6 +210,7 @@ docker run --rm -it --network host \
 
 ```bash
 docker run --rm -it --network host \
+  -v $(pwd)/captures:/app/captures \
   -v /path/to/key.json:/credentials.json:ro \
   ghcr.io/arakoodev/pinmoli --service-account /credentials.json
 ```
@@ -215,6 +219,7 @@ docker run --rm -it --network host \
 
 ```bash
 docker run --rm -it --network host \
+  -v $(pwd)/captures:/app/captures \
   -e GROQ_API_KEY=gsk_... \
   ghcr.io/arakoodev/pinmoli
 ```
@@ -439,6 +444,57 @@ Or generate tones:
 You: Generate a 1000Hz sine wave for 5 seconds, then test the endpoint
 ```
 
+## Packet Capture
+
+Every Pinmoli session automatically captures all SIP signaling and RTP media traffic to a pcap file. Open it in Wireshark for protocol-level debugging.
+
+### How it works
+
+The `entrypoint.sh` runs `tcpdump` in the background for the entire session:
+- Captures port 5060 (SIP) and UDP ports 10000-65535 (RTP/SRTP)
+- Saves to `/app/captures/pinmoli-YYYYMMDD-HHMMSS.pcap` inside the container
+- Stops automatically when the session ends (EXIT trap)
+
+### Saving captures to your local machine
+
+**Docker Compose** (development): Captures appear at `./captures/` automatically — the source directory is bind-mounted.
+
+**Docker Run** (GHCR image): Mount a volume so captures persist after the container exits:
+
+```bash
+# Create the captures directory (first time only)
+mkdir -p captures
+
+# Mount it when running Pinmoli
+docker run --rm -it --network host \
+  -v $(pwd)/captures:/app/captures \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  ghcr.io/arakoodev/pinmoli
+```
+
+After the session, your captures are in `./captures/`:
+
+```bash
+ls captures/
+# pinmoli-20260305-143022.pcap
+
+# Open in Wireshark
+wireshark captures/pinmoli-20260305-143022.pcap
+```
+
+Previous captures from earlier runs are preserved — new sessions create new pcap files with unique timestamps.
+
+### Disable capture
+
+If you don't need packet capture (e.g., CI/CD), set `PINMOLI_NO_CAPTURE=1`:
+
+```bash
+docker run --rm -it --network host \
+  -e PINMOLI_NO_CAPTURE=1 \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  ghcr.io/arakoodev/pinmoli
+```
+
 ## Project Structure
 
 ```
@@ -478,7 +534,7 @@ pinmoli/
 │   ├── unit/                   # Protocol, SDP, RTP, DTMF, storage, tools, lint, WebRTC
 │   ├── integration/            # TUI flows, e2e, bidirectional RTP, speech
 │   └── live/                   # Tests against real SIP and WebRTC endpoints
-├── eslint-plugin-pinmoli.cjs   # 13 lint rules from real bugs
+├── eslint-plugin-pinmoli.cjs   # 14 lint rules from real bugs
 ├── Dockerfile                  # Alpine + Node 20 + ffmpeg + espeak + tini
 ├── docker-compose.yml
 └── entrypoint.sh

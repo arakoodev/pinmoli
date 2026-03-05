@@ -11,7 +11,7 @@ const GenerateAudioParamsSchema = Type.Object({
     Type.Literal('dtmf'),
     Type.Literal('silence'),
     Type.Literal('speech')
-  ], { description: 'Type of audio to generate' }),
+  ], { description: 'Type of audio to generate: sine (pure tone), dtmf (dual-tone digits), silence, or speech (TTS via espeak).' }),
   filename: Type.String({ description: 'Output filename (without extension)' }),
   frequency: Type.Optional(Type.Number({
     minimum: 20,
@@ -35,7 +35,7 @@ const GenerateAudioParamsSchema = Type.Object({
     Type.Literal('PCMA'),
     Type.Literal('G722'),
   ], {
-    description: 'Audio codec for the generated WAV file. Default: PCMU (mu-law 8kHz).'
+    description: 'Audio codec for the generated WAV file: PCMU (mu-law 8kHz), PCMA (A-law 8kHz), or G722 (wideband 16kHz). Default: PCMU.'
   }))
 });
 

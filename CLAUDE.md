@@ -77,7 +77,7 @@ docker compose build && docker compose up -d
 
 ## Lint Rules (`eslint-plugin-pinmoli`)
 
-Custom ESLint plugin at `eslint-plugin-pinmoli.cjs` with 13 rules extracted from real bugs:
+Custom ESLint plugin at `eslint-plugin-pinmoli.cjs` with 14 rules extracted from real bugs:
 
 - **`pinmoli/no-console-in-lib`** — `console.*` in library code corrupts the TUI display
 - **`pinmoli/no-process-exit`** — `process.exit()` skips SIP cleanup (no BYE, no socket close)
@@ -92,6 +92,7 @@ Custom ESLint plugin at `eslint-plugin-pinmoli.cjs` with 13 rules extracted from
 - **`pinmoli/no-hardcoded-payload-type`** — Literal `0`/`8`/`9`/`111` as RTP payload type bypasses codec negotiation. Use `codec.payloadType`
 - **`pinmoli/no-optional-codec-in-media`** — Optional `codec?` parameter in media functions hides bugs. Callers silently get wrong PCMU defaults
 - **`pinmoli/no-silent-transcode-fallback`** — Transcode functions must throw for unsupported codecs, not silently return input unchanged
+- **`pinmoli/no-incomplete-enum-description`** — TypeBox `Type.Union` descriptions must mention all `Type.Literal` values. The LLM reads descriptions to determine valid inputs; missing values cause the LLM to reject valid options
 
 Run `docker compose exec pinmoli npm run lint` before committing.
 
@@ -114,6 +115,7 @@ Run `docker compose exec pinmoli npm run lint` before committing.
 6. **Never hardcode payload types** — use `codec.payloadType` from the negotiated `CodecInfo`, never literal `0`/`8`/`9`. Lint rule: `pinmoli/no-hardcoded-payload-type`
 7. **Codec params are required in media functions** — `saveAsWAV`, `receiveRTPAudio`, `sendRTPFromSocket` all require explicit codec/acceptedPayloadTypes. Never default to PCMU. Lint rule: `pinmoli/no-optional-codec-in-media`
 8. **Transcode must throw for unsupported codecs** — `transcodePcmuTo()` throws for codecs without an encoder (e.g. opus). Never silently return input unchanged. Lint rule: `pinmoli/no-silent-transcode-fallback`
+9. **Schema descriptions must list all valid values** — TypeBox `Type.Union` descriptions are the primary way the LLM learns what a parameter accepts. If the description mentions only a subset, the LLM rejects the rest. Lint rule: `pinmoli/no-incomplete-enum-description`
 
 ## WebRTC / WHIP Architecture
 

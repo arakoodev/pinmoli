@@ -424,6 +424,81 @@ describe('pinmoli/no-optional-codec-in-media', () => {
   });
 });
 
+// ---------- Rule 13: no-incomplete-enum-description ----------
+
+describe('pinmoli/no-incomplete-enum-description', () => {
+  it('flags Type.Union descriptions missing literal values', () => {
+    ruleTester.run('no-incomplete-enum-description', plugin.rules['no-incomplete-enum-description'], {
+      valid: [
+        // All values mentioned in description
+        `Type.Union([
+          Type.Literal('opus'),
+          Type.Literal('PCMU'),
+          Type.Literal('PCMA'),
+          Type.Literal('G722')
+        ], {
+          description: 'Audio codec: opus, PCMU (G.711 mu-law), PCMA (G.711 A-law), G722 (wideband).'
+        })`,
+        // No description — nothing to check
+        `Type.Union([
+          Type.Literal('opus'),
+          Type.Literal('PCMU')
+        ])`,
+        // Non-string literals (numbers) — not checked
+        `Type.Union([
+          Type.Literal(1),
+          Type.Literal(2)
+        ], { description: 'A number.' })`,
+        // Single literal — not meaningful to check
+        `Type.Union([
+          Type.Literal('opus')
+        ], { description: 'Only opus.' })`,
+        // Not a Type.Union call
+        `SomeOther.Union([
+          Type.Literal('a'),
+          Type.Literal('b')
+        ], { description: 'Only a.' })`,
+      ],
+      invalid: [
+        // The exact bug: description mentions only opus and PCMU, missing PCMA and G722
+        {
+          code: `Type.Union([
+            Type.Literal('opus'),
+            Type.Literal('PCMU'),
+            Type.Literal('PCMA'),
+            Type.Literal('G722')
+          ], {
+            description: 'Audio codec. LiveKit typically selects PCMU. Offer opus for compatibility.'
+          })`,
+          errors: [{ messageId: 'incomplete', data: { missing: 'PCMA, G722' } }],
+        },
+        // Missing one value
+        {
+          code: `Type.Union([
+            Type.Literal('udp'),
+            Type.Literal('tcp'),
+            Type.Literal('tls')
+          ], {
+            description: 'Transport: udp or tcp.'
+          })`,
+          errors: [{ messageId: 'incomplete', data: { missing: 'tls' } }],
+        },
+        // String concatenation in description
+        {
+          code: `Type.Union([
+            Type.Literal('OPTIONS'),
+            Type.Literal('INVITE'),
+            Type.Literal('REGISTER')
+          ], {
+            description: 'SIP method. ' + 'OPTIONS or INVITE.'
+          })`,
+          errors: [{ messageId: 'incomplete', data: { missing: 'REGISTER' } }],
+        },
+      ],
+    });
+  });
+});
+
 // ---------- Rule 12: no-silent-transcode-fallback ----------
 
 describe('pinmoli/no-silent-transcode-fallback', () => {

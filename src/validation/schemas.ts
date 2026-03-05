@@ -70,7 +70,7 @@ export const AudioSampleSchema = Type.Union([
   Type.Literal('voice-hello'),
   Type.Literal('silence')
 ], {
-  description: 'Audio to send during INVITE. "voice-hello" recommended for voice agents, "silence" to just listen.'
+  description: 'Audio to send during INVITE. Options: sine-440hz, sine-1000hz (test tones), dtmf-123 (DTMF digits), voice-hello (TTS greeting), silence (listen only). "voice-hello" recommended for voice agents, "silence" to just listen.'
 });
 
 export const TransportSchema = Type.Union([
@@ -79,7 +79,7 @@ export const TransportSchema = Type.Union([
   Type.Literal('tls'),
   Type.Literal('auto')
 ], {
-  description: 'Transport protocol. "auto" recommended for most cases. Use "tls" for sips: URIs.'
+  description: 'Transport protocol: udp, tcp, tls, or auto. "auto" recommended for most cases. Use "tls" for sips: URIs.'
 });
 
 // Test configuration
@@ -176,7 +176,7 @@ export const WebRtcTestConfigSchema = Type.Object({
     Type.Literal('opus'),
     Type.Literal('PCMU')
   ], {
-    description: 'Audio codec. Default: opus. Most WebRTC platforms prefer opus.',
+    description: 'Audio codec: opus or PCMU. Default: opus. Most WebRTC platforms prefer opus.',
   })),
   timeout: Type.Optional(Type.Number({
     minimum: 1000,

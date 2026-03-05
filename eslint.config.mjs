@@ -1,7 +1,7 @@
 /**
  * ESLint flat config for Pinmoli.
  *
- * Includes eslint-plugin-pinmoli (local) — 13 rules extracted from
+ * Includes eslint-plugin-pinmoli (local) — 14 rules extracted from
  * real bugs made by Claude Code in this codebase.
  */
 
@@ -87,6 +87,7 @@ export default [
       'pinmoli/no-hardcoded-payload-type': 'error',
       'pinmoli/no-optional-codec-in-media': 'error',
       'pinmoli/no-silent-transcode-fallback': 'error',
+      'pinmoli/no-incomplete-enum-description': 'error',
     },
   },
 
