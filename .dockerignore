@@ -9,3 +9,4 @@ package-lock.json
 gcp-service-account.json
 *.pem
 *.key
+captures
