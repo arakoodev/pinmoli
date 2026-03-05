@@ -7,7 +7,7 @@
 
 import { PinmoliTUI } from './ui/tui.js';
 import { PinmoliAgent } from './agent/runtime.js';
-import { configureServiceAccount } from './commands/service-account.js';
+import { configureServiceAccount, isVertexConfigured } from './commands/service-account.js';
 import { getEnvApiKey } from '@mariozechner/pi-ai';
 import type { KnownProvider } from '@mariozechner/pi-ai';
 import type { Config } from './validation/schemas.js';
@@ -98,7 +98,7 @@ function parseArgs(): CliArgs {
 function autoDetectProvider(): string | undefined {
   const order = ['anthropic', 'openai', 'google', 'google-vertex', 'groq', 'openrouter'];
   for (const provider of order) {
-    if (getEnvApiKey(provider as KnownProvider)) {
+    if (isProviderConfigured(provider)) {
       return provider;
     }
   }
@@ -107,8 +107,16 @@ function autoDetectProvider(): string | undefined {
 
 /**
  * Check if the given provider has valid credentials available.
+ *
+ * For google-vertex we check our own env vars directly because pi-ai's
+ * getEnvApiKey uses async dynamic imports for node:fs/os/path that may
+ * not have resolved yet — its cache returns false permanently on first
+ * call if the imports haven't settled.
  */
 function isProviderConfigured(provider: string): boolean {
+  if (provider === 'google-vertex') {
+    return isVertexConfigured();
+  }
   return !!getEnvApiKey(provider as KnownProvider);
 }
 
