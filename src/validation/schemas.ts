@@ -60,7 +60,7 @@ export const CodecSchema = Type.Union([
   Type.Literal('PCMA'),
   Type.Literal('G722')
 ], {
-  description: 'Audio codec. LiveKit typically selects PCMU. Offer ["opus", "PCMU"] for compatibility.'
+  description: 'Audio codec to offer. Supported: opus, PCMU (G.711 mu-law), PCMA (G.711 A-law), G722 (wideband). The remote server picks one from your offer.'
 });
 
 export const AudioSampleSchema = Type.Union([
@@ -88,8 +88,8 @@ export const TestConfigSchema = Type.Object({
   method: SipMethodSchema,
   codecs: Type.Array(CodecSchema, {
     minItems: 1,
-    description: 'Codecs to offer in SDP. LiveKit typically selects PCMU. Offer ["opus", "PCMU"] for compatibility.',
-    examples: [['opus', 'PCMU']]
+    description: 'Codecs to offer in SDP. Use ["PCMU"] for G.711, ["G722"] for wideband, or ["PCMU", "PCMA", "G722"] to let the server choose.',
+    examples: [['opus', 'PCMU'], ['PCMU'], ['G722'], ['PCMA', 'PCMU']]
   }),
   transport: TransportSchema,
   mediaPort: Type.Number({ minimum: 1024, maximum: 65535, default: 10000 }),

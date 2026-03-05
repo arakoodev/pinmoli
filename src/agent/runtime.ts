@@ -52,6 +52,13 @@ Before calling sip_test, validate and confirm parameters with the user:
 - INVITE: Confirm audio sample. Recommend sendDelay: 8 for voice agents that speak first. Mention responseWaitTime if relevant.
 - REGISTER: Ask about auth credentials (username/password).
 
+**Codec selection (all four supported):**
+- opus — modern, good quality, preferred by WebRTC
+- PCMU — G.711 mu-law, most widely supported SIP codec
+- PCMA — G.711 A-law, common in Europe/international
+- G722 — wideband (16kHz), higher quality than G.711
+When the user says "G.711" they mean PCMU or PCMA. When they say "G722" or "g722" use "G722".
+
 **WebRTC Pre-flight Validation:**
 - WHIP endpoint must be an HTTPS URL (or HTTP for local dev)
 - Bearer token required for authenticated endpoints (LiveKit, Cloudflare)
