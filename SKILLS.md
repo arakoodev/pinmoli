@@ -122,6 +122,7 @@ Generate custom audio samples at runtime using ffmpeg and espeak.
 | `duration` | number | no | `3` | Duration in seconds (0.1-30) |
 | `text` | string | no | -- | Text to synthesize (required for `speech` type) |
 | `digits` | string | no | -- | DTMF digits to generate: `0-9`, `*`, `#` |
+| `codec` | enum | no | `PCMU` | Output codec: `PCMU` (mu-law 8kHz), `PCMA` (A-law 8kHz), or `G722` (wideband 16kHz) |
 
 ### Audio Types
 
@@ -132,7 +133,7 @@ Generate custom audio samples at runtime using ffmpeg and espeak.
 | `silence` | Silent audio (useful as a baseline) |
 | `speech` | Text-to-speech via espeak, encoded as PCMU |
 
-All output is PCMU @ 8kHz mono (G.711 u-law) for SIP compatibility.
+Default output is PCMU @ 8kHz mono (G.711 u-law). Use the `codec` parameter for PCMA or G722 output.
 
 ### Examples
 
@@ -141,6 +142,8 @@ All output is PCMU @ 8kHz mono (G.711 u-law) for SIP compatibility.
 "Create a 2000Hz tone for 10 seconds"
 "Generate DTMF digits 1-2-3-4"
 "Make 5 seconds of silence"
+"Generate a greeting in PCMA format for A-law testing"
+"Create a G722 wideband tone for high-quality codec tests"
 ```
 
 ---
@@ -298,4 +301,43 @@ You: Test G722 wideband with the agent, then send DTMF 0 for operator
 You: List my saved tests
 You: Run 'daily-health'
 You: Run 'livekit-agent-check'
+```
+
+---
+
+## Packet Capture
+
+Every Pinmoli session automatically captures all SIP signaling (port 5060) and RTP/SRTP media (UDP 10000-65535) to a pcap file. The capture runs in the background via `tcpdump` for the entire session and saves to `/app/captures/pinmoli-YYYYMMDD-HHMMSS.pcap`.
+
+### Saving to host
+
+**Docker Compose**: Captures appear at `./captures/` automatically (bind mount).
+
+**Docker Run**: Mount a volume:
+
+```bash
+docker run --rm -it --network host \
+  -v $(pwd)/captures:/app/captures \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  ghcr.io/arakoodev/pinmoli
+```
+
+### Fail-fast behavior
+
+The entrypoint validates before starting:
+- `tcpdump` binary exists (exit 1 if missing — rebuild the image)
+- `/app/captures` is writable (exit 1 if not)
+- `tcpdump` actually starts (exit 1 if missing `CAP_NET_RAW`)
+- Warns if `/app/captures` is not volume-mounted (files lost on container exit)
+
+### Disable
+
+```bash
+PINMOLI_NO_CAPTURE=1
+```
+
+### Open in Wireshark
+
+```bash
+wireshark captures/pinmoli-20260305-143022.pcap
 ```

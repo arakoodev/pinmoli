@@ -142,7 +142,7 @@ const closeSocket = () => {
 };
 ```
 
-## Lint Rules (13 rules in eslint-plugin-pinmoli.cjs)
+## Lint Rules (14 rules in eslint-plugin-pinmoli.cjs)
 
 ### Protocol Correctness
 - `no-unroutable-ip-fallback` -- 0.0.0.0/127.0.0.1 in SDP creates unroutable headers
@@ -151,6 +151,9 @@ const closeSocket = () => {
 - `no-hardcoded-payload-type` -- literal 0/8/9/111 in payloadType context; use codec.payloadType
 - `no-optional-codec-in-media` -- codec? or codec = default in media functions
 - `no-silent-transcode-fallback` -- transcode functions with identity fallback return
+
+### Schema / LLM Correctness
+- `no-incomplete-enum-description` -- Type.Union descriptions must mention all Literal values; the LLM reads descriptions to decide valid inputs
 
 ### Process Safety
 - `no-console-in-lib` -- console.* in library code corrupts TUI display
@@ -203,6 +206,16 @@ docker compose exec pinmoli npm run lint                  # lint
 5. Add tests in `test/unit/codec.test.ts` and `test/unit/sdp.test.ts`
 6. Update documentation (README.md, SKILLS.md)
 
+## Packet Capture
+
+Every session auto-captures SIP + RTP traffic via `tcpdump` in `entrypoint.sh`.
+
+- Saves to `/app/captures/pinmoli-YYYYMMDD-HHMMSS.pcap`
+- Fail-fast: exits if tcpdump missing, `/app/captures` not writable, or tcpdump can't start
+- Warns if `/app/captures` is not volume-mounted (files lost on exit)
+- Disable: `PINMOLI_NO_CAPTURE=1`
+- For `docker run`: **all `-v` flags go BEFORE the image name**
+
 ## Dependencies
 
 **Core:**
@@ -217,4 +230,4 @@ docker compose exec pinmoli npm run lint                  # lint
 **Dev:**
 - `vitest`: Testing
 - `typescript`: Type checking
-- `eslint`: Linting with 13 custom rules
+- `eslint`: Linting with 14 custom rules

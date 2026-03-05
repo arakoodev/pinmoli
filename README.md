@@ -40,7 +40,9 @@ Pinmoli: Running INVITE test against sip:+15551234567@trunk.example.com...
 - **Failure analysis** -- pattern-matched diagnostics with actionable recovery steps
 - **Test persistence** -- save and reload test configurations (SQLite with FTS5)
 - **Works with any SIP or WebRTC endpoint** -- LiveKit, Daily.co, Twilio, Cloudflare, Asterisk, FreeSWITCH, or any RFC 3261/WHIP-compliant server
-- **Runs in Docker** -- all dependencies (ffmpeg, espeak, tini) included, no local setup required
+- **Automatic packet capture** -- every session captures SIP signaling and RTP media to pcap (Wireshark-ready), fail-fast if volume not mounted
+- **Real codec negotiation** -- PCMU (G.711 u-law), PCMA (G.711 A-law), G722 (wideband), opus. Transcodes audio at send time to match the negotiated codec
+- **Runs in Docker** -- all dependencies (ffmpeg, espeak, tcpdump, tini) included, no local setup required
 
 ## Architecture
 
@@ -535,7 +537,7 @@ pinmoli/
 │   ├── integration/            # TUI flows, e2e, bidirectional RTP, speech
 │   └── live/                   # Tests against real SIP and WebRTC endpoints
 ├── eslint-plugin-pinmoli.cjs   # 14 lint rules from real bugs
-├── Dockerfile                  # Alpine + Node 20 + ffmpeg + espeak + tini
+├── Dockerfile                  # Alpine + Node 20 + ffmpeg + espeak + tcpdump + tini
 ├── docker-compose.yml
 └── entrypoint.sh
 ```

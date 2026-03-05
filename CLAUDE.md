@@ -52,7 +52,7 @@ docker compose build && docker compose up -d
 ## Architecture
 
 ### Docker stack (`docker-compose.yml`)
-- **pinmoli**: Node.js 20 Alpine container with ffmpeg, espeak, tini. `network_mode: host` for SIP/RTP access.
+- **pinmoli**: Node.js 20 Alpine container with ffmpeg, espeak, tcpdump, tini. `network_mode: host` for SIP/RTP access. Automatic pcap capture via `entrypoint.sh`.
 
 ### Source (`src/`)
 - `cli.ts` — Entry point, CLI arg parsing, multi-provider auto-detection
@@ -145,3 +145,12 @@ The WebRTC engine (`src/webrtc/`) mirrors the SIP engine pattern:
 - **The 503 is synthetic**: `sip` npm library generates it when TCP drops after 60s
 - **SDP requires routable IP**: `0.0.0.0` or Docker IPs in SDP cause silent ICE failures
 - **Codec negotiation**: LiveKit selects PCMU/8000 even when opus offered first. Always offer both.
+
+## Packet Capture (`entrypoint.sh`)
+
+- Background `tcpdump` captures SIP (port 5060) + RTP (UDP 10000-65535) for every session
+- Saves to `/app/captures/pinmoli-YYYYMMDD-HHMMSS.pcap`
+- **Fail-fast**: exits immediately if tcpdump missing, `/app/captures` not writable, or tcpdump can't start
+- **Warning**: prints if `/app/captures` is not a volume mount (files lost on container exit)
+- Disable with `PINMOLI_NO_CAPTURE=1`
+- For `docker run`: must mount `-v $(pwd)/captures:/app/captures` — all `-v` flags go BEFORE the image name
