@@ -75,9 +75,9 @@
    - Silence
 
 4. **analyze_failure** - Diagnose test failures
-5. **save_test** - Save test configurations
-6. **load_test** - Load saved tests
-7. **list_tests** - List all saved tests
+5. **save_test** - Save test configurations to SQLite (catches duplicate names)
+6. **load_test** - Load saved tests from SQLite (returns config or "not found")
+7. **list_tests** - List all saved tests from SQLite (name + timestamp)
 
 ### Audio Capabilities
 
@@ -92,6 +92,14 @@
 - Custom frequencies (20Hz-20kHz)
 - Custom durations (0.1s-30s)
 - All output as PCMU @ 8kHz mono
+
+**Audio File Capture:**
+- Both engines save inbound + outbound audio as WAV to `captures/audio/`
+- SIP: agent-greeting, agent-response, sent-audio (transcoded to negotiated codec)
+- WebRTC: webrtc-greeting, webrtc-response, webrtc-sent
+- WebRTC opus decoded via OGG Opus container (RFC 7845) + ffmpeg
+- WebRTC PCMU saved as mu-law WAV directly
+- SIP graceful degradation: if outbound codec encode unsupported (e.g., opus), warns and continues receive-only
 
 ### Bidirectional Conversation
 

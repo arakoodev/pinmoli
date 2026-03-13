@@ -5,6 +5,7 @@
 
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
+import { loadCollection } from '../storage/db.js';
 
 export const loadTestTool: AgentTool = {
   name: 'load_test',
@@ -13,28 +14,28 @@ export const loadTestTool: AgentTool = {
   parameters: Type.Object({
     name: Type.String({ description: 'Name of the saved test' })
   }),
-  
+
   async execute(toolCallId, params, _signal, _onUpdate) {
     const { name } = params as { name: string };
-    
-    // TODO: Load from SQLite database
-    // For now, return mock data
-    
-    const mockConfig = {
-      uri: 'sip:agent@example.com',
-      method: 'OPTIONS',
-      codecs: ['opus'],
-      transport: 'udp',
-      mediaPort: 10000,
-      timeout: 5000
-    };
-    
+
+    const config = loadCollection(name);
+
+    if (!config) {
+      return {
+        content: [{
+          type: 'text',
+          text: `No test found with name "${name}". Use list_tests to see available tests.`
+        }],
+        details: { error: 'not_found', name },
+      };
+    }
+
     return {
       content: [{
         type: 'text',
-        text: `Loaded test "${name}":\n${JSON.stringify(mockConfig, null, 2)}`
+        text: `Loaded test "${name}":\n${JSON.stringify(config, null, 2)}`
       }],
-      details: { name, config: mockConfig }
+      details: { name, config }
     };
   }
 };

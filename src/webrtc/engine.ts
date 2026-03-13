@@ -12,8 +12,9 @@ import {
   usePCMU,
 } from 'werift';
 import { resolve } from 'path';
+import { mkdirSync } from 'fs';
 import { whipOffer, whipDelete, WhipError } from './whip.js';
-import { loadAudioAsFrames, saveReceivedAudio, type AudioFrameConfig } from './audio-frames.js';
+import { loadAudioAsFrames, saveReceivedAudio, savePayloadsAsWav, type AudioFrameConfig } from './audio-frames.js';
 import { getAudioSamplePath } from '../sip/audio.js';
 import { DTMF_EVENT_MAP, DTMF_DEFAULTS, DtmfDetector, planDtmfDigit } from '../sip/dtmf.js';
 import type { WebRtcTestConfig, TestEvent } from '../validation/schemas.js';
@@ -54,10 +55,14 @@ export async function* runWebRtcTest(config: WebRtcTestConfig): AsyncGenerator<T
     codecs: { audio: codecs },
   });
 
-  // Track received audio frames + DTMF
-  const receivedFrames: Int16Array[] = [];
+  // Track received raw RTP payloads + DTMF
+  const receivedPayloads: Buffer[] = [];
   const dtmfDetector = new DtmfDetector();
   let resourceUrl = '';
+
+  // Audio output directory
+  const audioDir = resolve(process.cwd(), 'captures', 'audio');
+  mkdirSync(audioDir, { recursive: true });
 
   try {
     // --- Add audio transceiver ---
@@ -69,26 +74,14 @@ export async function* runWebRtcTest(config: WebRtcTestConfig): AsyncGenerator<T
       message: `Added audio transceiver (${codec}, sendrecv)`,
     };
 
-    // Listen for incoming RTP on receiver track
+    // Listen for incoming RTP on receiver track — store raw codec payloads
     transceiver.receiver.track.onReceiveRtp.subscribe((rtpPacket: RtpPacket) => {
-      // Feed DTMF detector — skip telephone-event from audio accumulation
       const pt = rtpPacket.header.payloadType;
-      dtmfDetector.feed(
-        pt,
-        rtpPacket.payload,
-        rtpPacket.header.timestamp,
-      );
-      // Skip telephone-event packets from audio frame accumulation
+      dtmfDetector.feed(pt, rtpPacket.payload, rtpPacket.header.timestamp);
+      // Skip telephone-event packets from audio accumulation
       if (pt === DTMF_DEFAULTS.payloadType) return;
-
-      // Extract raw PCM-like payload (actual decoding depends on codec)
-      // For now, store raw payload bytes and convert at save time
-      const payload = rtpPacket.payload;
-      const samples = new Int16Array(payload.length / 2);
-      for (let i = 0; i < samples.length; i++) {
-        samples[i] = payload.readInt16LE(i * 2);
-      }
-      receivedFrames.push(samples);
+      // Store raw payload — decoded at save time via savePayloadsAsWav
+      receivedPayloads.push(Buffer.from(rtpPacket.payload));
     });
 
     // --- Create and send SDP offer ---
@@ -171,25 +164,23 @@ export async function* runWebRtcTest(config: WebRtcTestConfig): AsyncGenerator<T
         message: `Listening for agent greeting (${sendDelay}s)...`,
       };
 
-      const greetingFramesBefore = receivedFrames.length;
+      const greetingPayloadsBefore = receivedPayloads.length;
       await sleep(sendDelay * 1000);
-      const greetingFramesReceived = receivedFrames.length - greetingFramesBefore;
+      const greetingPayloadsReceived = receivedPayloads.length - greetingPayloadsBefore;
 
-      if (greetingFramesReceived > 0) {
-        const greetingFile = resolve(
-          process.cwd(), 'audio-samples',
-          `webrtc-greeting-${Date.now()}.wav`
-        );
-        saveReceivedAudio(
-          receivedFrames.slice(greetingFramesBefore),
+      if (greetingPayloadsReceived > 0) {
+        const greetingFile = resolve(audioDir, `webrtc-greeting-${Date.now()}.wav`);
+        savePayloadsAsWav(
+          receivedPayloads.slice(greetingPayloadsBefore),
+          codec,
           audioConfig,
-          greetingFile
+          greetingFile,
         );
 
         yield {
           type: 'info',
           timestamp: Date.now(),
-          message: `Received ${greetingFramesReceived} greeting frames from agent`,
+          message: `Received ${greetingPayloadsReceived} greeting packets from agent`,
         };
         yield {
           type: 'info',
@@ -224,6 +215,16 @@ export async function* runWebRtcTest(config: WebRtcTestConfig): AsyncGenerator<T
       };
 
       const frames = loadAudioAsFrames(samplePath, audioConfig);
+
+      // Save outbound audio to captures/audio/
+      const outboundFile = resolve(audioDir, `webrtc-sent-${Date.now()}.wav`);
+      saveReceivedAudio(frames, audioConfig, outboundFile);
+      yield {
+        type: 'info',
+        timestamp: Date.now(),
+        message: `Outbound audio saved: ${outboundFile}`,
+      };
+
       let framesSent = 0;
 
       for (const frame of frames) {
@@ -342,25 +343,23 @@ export async function* runWebRtcTest(config: WebRtcTestConfig): AsyncGenerator<T
       message: `Listening for agent response (${responseWaitTime}s)...`,
     };
 
-    const responseFramesBefore = receivedFrames.length;
+    const responsePayloadsBefore = receivedPayloads.length;
     await sleep(responseWaitTime * 1000);
-    const responseFramesReceived = receivedFrames.length - responseFramesBefore;
+    const responsePayloadsReceived = receivedPayloads.length - responsePayloadsBefore;
 
-    if (responseFramesReceived > 0) {
-      const responseFile = resolve(
-        process.cwd(), 'audio-samples',
-        `webrtc-response-${Date.now()}.wav`
-      );
-      saveReceivedAudio(
-        receivedFrames.slice(responseFramesBefore),
+    if (responsePayloadsReceived > 0) {
+      const responseFile = resolve(audioDir, `webrtc-response-${Date.now()}.wav`);
+      savePayloadsAsWav(
+        receivedPayloads.slice(responsePayloadsBefore),
+        codec,
         audioConfig,
-        responseFile
+        responseFile,
       );
 
       yield {
         type: 'info',
         timestamp: Date.now(),
-        message: `Received ${responseFramesReceived} frames from agent`,
+        message: `Received ${responsePayloadsReceived} packets from agent`,
       };
       yield {
         type: 'info',

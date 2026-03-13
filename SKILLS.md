@@ -56,6 +56,8 @@ Returns a stream of SIP events:
 - DTMF digits sent and detected (RFC 4733 telephone-event)
 - Codec negotiation results
 - Timing information for each step
+- Audio files saved to `captures/audio/` (inbound agent audio + outbound sent audio)
+- Graceful degradation: if outbound codec encode is unsupported (e.g., opus), continues receive-only with a warning
 
 ---
 
@@ -104,7 +106,8 @@ Returns a stream of test events:
 - ICE connectivity checks and DTLS handshake
 - RTP send/receive statistics
 - DTMF digits sent and detected
-- Agent audio saved as WAV file
+- Audio files saved to `captures/audio/` (inbound agent audio + outbound sent audio)
+- Opus RTP payloads decoded via OGG container + ffmpeg; PCMU saved as mu-law WAV
 
 ---
 
@@ -181,7 +184,7 @@ Analyze a failed SIP test and provide diagnostic insights.
 
 ## `save_test`
 
-Save a test configuration for later reuse.
+Save a test configuration to SQLite (`~/.pinmoli/pinmoli.db`).
 
 ### Parameters
 
@@ -189,6 +192,12 @@ Save a test configuration for later reuse.
 |-----------|------|----------|-------------|
 | `name` | string | yes | Unique name (alphanumeric, hyphens, underscores) |
 | `config` | object | yes | Full test configuration (same parameters as `sip_test`) |
+
+### Behavior
+
+- Stores the full config as JSON in SQLite with FTS5 indexing
+- Returns an error if a test with the same name already exists (UNIQUE constraint)
+- Data persists across container restarts at `~/.pinmoli/pinmoli.db`
 
 ### Examples
 
@@ -201,13 +210,19 @@ Save a test configuration for later reuse.
 
 ## `load_test`
 
-Load and run a previously saved test configuration.
+Load a previously saved test configuration by name.
 
 ### Parameters
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `name` | string | yes | Name of the saved test |
+
+### Behavior
+
+- Returns the full test config JSON if found
+- Returns a "not found" message if no test exists with that name
+- Does not auto-run the test — the LLM decides what to do with the loaded config
 
 ### Examples
 
@@ -220,11 +235,17 @@ Load and run a previously saved test configuration.
 
 ## `list_tests`
 
-List all saved test configurations.
+List all saved test configurations from SQLite.
 
 ### Parameters
 
 None.
+
+### Behavior
+
+- Returns all saved tests sorted by creation date (newest first)
+- Shows test name and creation timestamp
+- Returns "No saved tests" if the database is empty
 
 ### Examples
 
@@ -302,6 +323,27 @@ You: List my saved tests
 You: Run 'daily-health'
 You: Run 'livekit-agent-check'
 ```
+
+---
+
+## Audio Capture
+
+Both engines automatically save inbound and outbound audio as WAV files to `captures/audio/`:
+
+| File pattern | Source | Description |
+|-------------|--------|-------------|
+| `agent-greeting-*.wav` | SIP | Agent's greeting (when `sendDelay > 0`) |
+| `agent-response-*.wav` | SIP | Agent's response after your audio |
+| `sent-audio-*.wav` | SIP | Audio you sent (transcoded to negotiated codec) |
+| `webrtc-greeting-*.wav` | WebRTC | Agent greeting |
+| `webrtc-response-*.wav` | WebRTC | Agent response |
+| `webrtc-sent-*.wav` | WebRTC | Outbound audio |
+
+WebRTC codec handling:
+- **opus**: Raw RTP payloads wrapped in an OGG Opus container (RFC 7845), decoded to PCM16 WAV via ffmpeg
+- **PCMU**: Saved directly as mu-law WAV (format code 7)
+
+SIP codec handling uses the existing `saveAsWAV()` which supports PCMU, PCMA (A-law WAV), and G722 (ffmpeg decode).
 
 ---
 

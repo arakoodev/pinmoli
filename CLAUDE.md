@@ -66,8 +66,8 @@ docker compose build && docker compose up -d
 - `sip/protocol.ts` — SIP utilities
 - `webrtc/engine.ts` — WebRTC test orchestration (async generator, mirrors SIP engine)
 - `webrtc/whip.ts` — WHIP signaling client (RFC 9725: HTTP POST offer → answer)
-- `webrtc/audio-frames.ts` — PCM16 frame chunking + WAV save for WebRTC audio
-- `storage/db.ts` — SQLite + FTS5 persistence
+- `webrtc/audio-frames.ts` — PCM16 frame chunking, OGG Opus builder/decoder, codec-aware WAV save
+- `storage/db.ts` — SQLite + FTS5 persistence (save/load/list tools backed by this)
 - `validation/schemas.ts` — Input validation (TypeBox + Zod)
 
 ### Tests (`test/`)

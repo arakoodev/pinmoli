@@ -4,6 +4,7 @@
  */
 
 import dgram from 'dgram';
+import { mkdirSync } from 'fs';
 import { generateCallId, generateTag } from './protocol.js';
 import { buildSdp, parseSdpAnswer } from './sdp.js';
 import { getAudioSamplePath } from './audio.js';
@@ -250,9 +251,13 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         // Shared DTMF detector for incoming digits across all phases
         const dtmfDetector = new DtmfDetector();
 
+        // Audio output directory
+        const audioDir = resolve(process.cwd(), 'captures', 'audio');
+        mkdirSync(audioDir, { recursive: true });
+
         // ---- Phase 1: Listen for agent greeting (if sendDelay > 0) ----
         if (sendDelay > 0) {
-          const greetingFile = resolve(process.cwd(), 'audio-samples', `agent-greeting-${Date.now()}.wav`);
+          const greetingFile = resolve(audioDir, `agent-greeting-${Date.now()}.wav`);
 
           yield {
             type: 'info',
@@ -289,7 +294,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         }
 
         // ---- Phase 2: Send audio + listen for reply ----
-        const responseFile = resolve(process.cwd(), 'audio-samples', `agent-response-${Date.now()}.wav`);
+        const responseFile = resolve(audioDir, `agent-response-${Date.now()}.wav`);
 
         yield {
           type: 'info',
@@ -306,21 +311,41 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         let audioStreamState: RtpStreamState | undefined;
         if (pcmuData) {
           // Transcode PCMU audio to negotiated codec if needed
-          const sendData = transcodePcmuTo(pcmuData, negotiatedCodec);
+          let sendData: Buffer | null = null;
+          try {
+            sendData = transcodePcmuTo(pcmuData, negotiatedCodec);
+          } catch (err) {
+            yield {
+              type: 'info',
+              timestamp: Date.now(),
+              message: `Cannot encode ${negotiatedCodec.name} — sending silence, inbound audio still recording (${err instanceof Error ? err.message : String(err)})`
+            };
+          }
 
-          yield {
-            type: 'info',
-            timestamp: Date.now(),
-            message: `Sending audio as ${negotiatedCodec.name} (${sample}) to ${remoteIp}:${remotePort} from port ${rtpPort}`
-          };
+          if (sendData) {
+            yield {
+              type: 'info',
+              timestamp: Date.now(),
+              message: `Sending audio as ${negotiatedCodec.name} (${sample}) to ${remoteIp}:${remotePort} from port ${rtpPort}`
+            };
 
-          audioStreamState = await sendRTPFromSocket(rtpSocket, sendData, remoteIp, remotePort, { codec: negotiatedCodec });
+            audioStreamState = await sendRTPFromSocket(rtpSocket, sendData, remoteIp, remotePort, { codec: negotiatedCodec });
 
-          yield {
-            type: 'info',
-            timestamp: Date.now(),
-            message: `Sent ${audioStreamState.packetsSent} RTP packets`
-          };
+            // Save outbound audio
+            const sentFile = resolve(audioDir, `sent-audio-${Date.now()}.wav`);
+            saveAsWAV([sendData], sentFile, negotiatedCodec);
+            yield {
+              type: 'info',
+              timestamp: Date.now(),
+              message: `Outbound audio saved: ${sentFile}`
+            };
+
+            yield {
+              type: 'info',
+              timestamp: Date.now(),
+              message: `Sent ${audioStreamState.packetsSent} RTP packets`
+            };
+          }
         } else {
           yield {
             type: 'info',

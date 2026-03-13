@@ -38,10 +38,11 @@ Pinmoli: Running INVITE test against sip:+15551234567@trunk.example.com...
 - **DTMF send and receive (RFC 4733)** -- send telephone-event RTP packets during active calls, detect incoming DTMF from the remote side
 - **Runtime speech synthesis** -- generate custom TTS audio on the fly with espeak
 - **Failure analysis** -- pattern-matched diagnostics with actionable recovery steps
-- **Test persistence** -- save and reload test configurations (SQLite with FTS5)
+- **Test persistence** -- save, load, and list test configurations backed by SQLite with FTS5 full-text search
 - **Works with any SIP or WebRTC endpoint** -- LiveKit, Daily.co, Twilio, Cloudflare, Asterisk, FreeSWITCH, or any RFC 3261/WHIP-compliant server
 - **Automatic packet capture** -- every session captures SIP signaling and RTP media to pcap (Wireshark-ready), fail-fast if volume not mounted
-- **Real codec negotiation** -- PCMU (G.711 u-law), PCMA (G.711 A-law), G722 (wideband), opus. Transcodes audio at send time to match the negotiated codec
+- **Audio file capture** -- both engines save inbound (agent) and outbound (sent) audio as WAV to `captures/audio/`. WebRTC opus payloads decoded via OGG container + ffmpeg
+- **Real codec negotiation** -- PCMU (G.711 u-law), PCMA (G.711 A-law), G722 (wideband), opus. Transcodes audio at send time to match the negotiated codec. Graceful degradation if outbound encode unsupported (e.g., SIP opus): warns and continues receive-only
 - **Runs in Docker** -- all dependencies (ffmpeg, espeak, tcpdump, tini) included, no local setup required
 
 ## Architecture
@@ -139,7 +140,7 @@ User input
 │  async function* runWebRtcTest(config): AsyncGenerator<TestEvent>│
 │                                                                  │
 │  ┌─ whip.ts ───── WHIP signaling (RFC 9725: POST offer→answer)  │
-│  ├─ audio-frames.ts ── PCM16 frame chunking + WAV save           │
+│  ├─ audio-frames.ts ── PCM16 frames, OGG Opus builder, WAV save │
 │  └─ werift ────── Pure TS WebRTC stack (ICE/DTLS/SRTP/RTP)      │
 │                                                                  │
 │  Yields events as they happen:                                   │
@@ -413,9 +414,9 @@ Pinmoli exposes 7 tools to the AI agent. You don't call these directly -- you de
 | `webrtc_test` | Connect to a WHIP endpoint, negotiate ICE/DTLS/SRTP, send audio, capture agent response. Supports DTMF. |
 | `generate_audio` | Create custom audio samples (sine, DTMF dual-tone, silence, TTS speech) |
 | `analyze_failure` | Diagnose a failed test and suggest fixes |
-| `save_test` | Save a test configuration by name |
-| `load_test` | Reload and run a saved test |
-| `list_tests` | List all saved test configurations |
+| `save_test` | Save a test configuration by name (SQLite, catches duplicate names) |
+| `load_test` | Load a saved test configuration by name |
+| `list_tests` | List all saved test configurations with timestamps |
 
 ## Audio Samples
 
@@ -486,6 +487,22 @@ wireshark captures/pinmoli-20260305-143022.pcap
 
 Previous captures from earlier runs are preserved — new sessions create new pcap files with unique timestamps.
 
+### Audio Files
+
+Both engines save inbound and outbound audio as WAV files to `captures/audio/`:
+
+```bash
+ls captures/audio/
+# agent-greeting-1741856422000.wav   # SIP: agent's greeting (if sendDelay > 0)
+# agent-response-1741856435000.wav   # SIP: agent's response
+# sent-audio-1741856430000.wav       # SIP: outbound audio (transcoded to negotiated codec)
+# webrtc-greeting-1741856450000.wav  # WebRTC: agent greeting
+# webrtc-response-1741856465000.wav  # WebRTC: agent response
+# webrtc-sent-1741856460000.wav      # WebRTC: outbound audio
+```
+
+WebRTC opus payloads are decoded via an OGG Opus container piped through ffmpeg. PCMU payloads are saved as mu-law WAV directly. Audio files persist alongside pcap captures in the same volume mount.
+
 ### Disable capture
 
 If you don't need packet capture (e.g., CI/CD), set `PINMOLI_NO_CAPTURE=1`:
@@ -527,7 +544,7 @@ pinmoli/
 │   ├── webrtc/
 │   │   ├── engine.ts           # WebRTC test orchestration (async generator)
 │   │   ├── whip.ts             # WHIP signaling client (RFC 9725)
-│   │   └── audio-frames.ts     # PCM16 frame chunking + WAV save
+│   │   └── audio-frames.ts     # PCM16 frames, OGG Opus decode, WAV save
 │   ├── storage/db.ts           # SQLite + FTS5 persistence
 │   ├── validation/schemas.ts   # TypeBox schemas
 │   └── commands/service-account.ts
