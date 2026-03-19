@@ -4,15 +4,14 @@
  */
 
 import dgram from 'dgram';
-import { mkdirSync } from 'fs';
 import { generateCallId, generateTag } from './protocol.js';
 import { buildSdp, parseSdpAnswer } from './sdp.js';
 import { getAudioSamplePath } from './audio.js';
 import { receiveRTPAudio, saveAsWAV, sendRTPFromSocket, sendDtmfFromSocket, loadAudioSample, type RtpStreamState } from './rtp-receiver.js';
 import { transcodePcmuTo, CODEC_TABLE, type CodecInfo } from './codec.js';
 import { DtmfDetector } from './dtmf.js';
+import { createSession } from '../network/session.js';
 import type { TestConfig, SipEvent } from '../validation/schemas.js';
-import { resolve } from 'path';
 
 /**
  * Generate SDP for INVITE
@@ -49,10 +48,13 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
     const host = uriMatch[2];
     const port = parseInt(uriMatch[4] || '5060');
 
+    // Create session directory for all artifacts
+    const session = createSession('sip', config.method, host);
+
     yield {
       type: 'info',
       timestamp: Date.now(),
-      message: `Resolved: ${host}:${port}`
+      message: `Resolved: ${host}:${port} — session: ${session.name}`
     };
 
     // Create separate sockets for SIP signaling and RTP media
@@ -112,6 +114,9 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
       sipMessage = buildRegisterRequest(config.uri, host, port, callId, fromTag, branch, publicIp, sipPort);
     }
 
+    // Log outbound request to session
+    session.logSignaling('>>>', `SENT ${config.method}`, sipMessage);
+
     yield {
       type: 'sip',
       timestamp: Date.now(),
@@ -147,6 +152,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         } else if (!hasFinalResponse && config.method === 'INVITE') {
           // Got only provisional (1xx) responses — send CANCEL before closing
           const cancelMessage = buildCancelRequest(config.uri, host, port, callId, fromTag, branch, publicIp, sipPort);
+          session.logSignaling('>>>', 'SENT CANCEL', cancelMessage);
           sipSocket.send(cancelMessage, port, host, () => {
             // Wait briefly for 487 Request Terminated, then close
             const cancelTimeout = setTimeout(() => { safeClose(); resolve(); }, 2000);
@@ -168,6 +174,9 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           const duration = Date.now() - startTime;
 
           responses.push({ statusCode, statusText, response });
+
+          // Log received response to session
+          session.logSignaling('<<<', `RECEIVED ${statusCode} ${statusText}`, response);
 
           // Emit response immediately for yielding
           sipSocket.emit('response', { statusCode, statusText, duration, response });
@@ -249,6 +258,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
 
         // Send ACK (with To-tag from 200 OK per RFC 3261 Section 12.2.1.1)
         const ackMessage = buildAckRequest(config.uri, host, port, callId, fromTag, toTag, branch, publicIp, sipPort);
+        session.logSignaling('>>>', 'SENT ACK', ackMessage);
         yield {
           type: 'sip',
           timestamp: Date.now(),
@@ -270,13 +280,9 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         // Shared DTMF detector for incoming digits across all phases
         const dtmfDetector = new DtmfDetector();
 
-        // Audio output directory
-        const audioDir = resolve(process.cwd(), 'captures', 'audio');
-        mkdirSync(audioDir, { recursive: true });
-
         // ---- Phase 1: Listen for agent greeting (if sendDelay > 0) ----
         if (sendDelay > 0) {
-          const greetingFile = resolve(audioDir, `agent-greeting-${Date.now()}.wav`);
+          const greetingFile = session.file('agent-greeting.wav');
 
           yield {
             type: 'info',
@@ -313,7 +319,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         }
 
         // ---- Phase 2: Send audio, then listen for reply ----
-        const responseFile = resolve(audioDir, `agent-response-${Date.now()}.wav`);
+        const responseFile = session.file('agent-response.wav');
 
         // Send audio FIRST (from the SAME socket — fixes port mismatch bug)
         let audioStreamState: RtpStreamState | undefined;
@@ -340,7 +346,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
             audioStreamState = await sendRTPFromSocket(rtpSocket, sendData, remoteIp, remotePort, { codec: negotiatedCodec });
 
             // Save outbound audio
-            const sentFile = resolve(audioDir, `sent-audio-${Date.now()}.wav`);
+            const sentFile = session.file('sent-audio.wav');
             saveAsWAV([sendData], sentFile, negotiatedCodec);
             yield {
               type: 'info',
@@ -459,6 +465,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
 
         // Send BYE to hang up (with To-tag for dialog matching)
         const byeMessage = buildByeRequest(config.uri, host, port, callId, fromTag, toTag, branch, publicIp, sipPort);
+        session.logSignaling('>>>', 'SENT BYE', byeMessage);
         yield {
           type: 'sip',
           timestamp: Date.now(),
@@ -532,12 +539,25 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
     const hasFinalSuccess = responses.some(r => r.statusCode >= 200 && r.statusCode < 300);
     const succeeded = config.method === 'INVITE' ? inviteHandled : hasFinalSuccess;
 
+    // Write session metadata
+    session.writeMetadata({
+      session: session.name,
+      config: { uri: config.uri, method: config.method, codecs: config.codecs, transport: config.transport },
+      startTime: new Date(startTime).toISOString(),
+      duration,
+      succeeded,
+      timedOut,
+      responses: responses.map(r => ({ status: r.statusCode, text: r.statusText })),
+      publicIp,
+      rtpPort,
+    });
+
     yield {
       type: succeeded ? 'info' : 'error',
       timestamp: Date.now(),
       message: succeeded
-        ? `Test completed successfully in ${duration}ms`
-        : `Test failed after ${duration}ms`,
+        ? `Test completed successfully in ${duration}ms — session: ${session.dir}`
+        : `Test failed after ${duration}ms — session: ${session.dir}`,
       ...(succeeded ? {} : { severity: 'error' as const, code: timedOut ? 'TIMEOUT' : 'NO_SUCCESS_RESPONSE' })
     };
 

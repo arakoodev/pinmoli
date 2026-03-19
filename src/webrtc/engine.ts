@@ -11,9 +11,8 @@ import {
   useOPUS,
   usePCMU,
 } from 'werift';
-import { resolve } from 'path';
-import { mkdirSync } from 'fs';
 import { whipOffer, whipDelete, WhipError } from './whip.js';
+import { createSession } from '../network/session.js';
 import { loadAudioAsFrames, saveReceivedAudio, savePayloadsAsWav, type AudioFrameConfig } from './audio-frames.js';
 import { getAudioSamplePath } from '../sip/audio.js';
 import { DTMF_EVENT_MAP, DTMF_DEFAULTS, DtmfDetector, planDtmfDigit } from '../sip/dtmf.js';
@@ -25,10 +24,15 @@ import type { WebRtcTestConfig, TestEvent } from '../validation/schemas.js';
 export async function* runWebRtcTest(config: WebRtcTestConfig): AsyncGenerator<TestEvent> {
   const t0 = Date.now();
 
+  // Extract host from WHIP URL for session naming
+  let whipHost = 'unknown';
+  try { whipHost = new URL(config.whipEndpoint).hostname; } catch (_e) { /* use default */ }
+  const session = createSession('webrtc', 'whip', whipHost);
+
   yield {
     type: 'info',
     timestamp: Date.now(),
-    message: `Starting WebRTC test to ${config.whipEndpoint}`,
+    message: `Starting WebRTC test to ${config.whipEndpoint} — session: ${session.name}`,
   };
 
   const codec = config.codec ?? 'opus';
@@ -60,10 +64,6 @@ export async function* runWebRtcTest(config: WebRtcTestConfig): AsyncGenerator<T
   const dtmfDetector = new DtmfDetector();
   let resourceUrl = '';
 
-  // Audio output directory
-  const audioDir = resolve(process.cwd(), 'captures', 'audio');
-  mkdirSync(audioDir, { recursive: true });
-
   try {
     // --- Add audio transceiver ---
     const transceiver = pc.addTransceiver('audio', { direction: 'sendrecv' });
@@ -88,6 +88,8 @@ export async function* runWebRtcTest(config: WebRtcTestConfig): AsyncGenerator<T
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
 
+    session.logSignaling('>>>', 'WHIP OFFER (SDP)', offer.sdp ?? '');
+
     yield {
       type: 'webrtc',
       timestamp: Date.now(),
@@ -107,6 +109,7 @@ export async function* runWebRtcTest(config: WebRtcTestConfig): AsyncGenerator<T
       resourceUrl = result.resourceUrl;
     } catch (err) {
       if (err instanceof WhipError) {
+        session.logSignaling('<<<', `WHIP ERROR ${err.message}`, '');
         yield {
           type: 'error',
           timestamp: Date.now(),
@@ -119,6 +122,8 @@ export async function* runWebRtcTest(config: WebRtcTestConfig): AsyncGenerator<T
       }
       throw err;
     }
+
+    session.logSignaling('<<<', 'WHIP ANSWER (SDP)', sdpAnswer);
 
     yield {
       type: 'webrtc',
@@ -169,7 +174,7 @@ export async function* runWebRtcTest(config: WebRtcTestConfig): AsyncGenerator<T
       const greetingPayloadsReceived = receivedPayloads.length - greetingPayloadsBefore;
 
       if (greetingPayloadsReceived > 0) {
-        const greetingFile = resolve(audioDir, `webrtc-greeting-${Date.now()}.wav`);
+        const greetingFile = session.file('agent-greeting.wav');
         savePayloadsAsWav(
           receivedPayloads.slice(greetingPayloadsBefore),
           codec,
@@ -217,7 +222,7 @@ export async function* runWebRtcTest(config: WebRtcTestConfig): AsyncGenerator<T
       const frames = loadAudioAsFrames(samplePath, audioConfig);
 
       // Save outbound audio to captures/audio/
-      const outboundFile = resolve(audioDir, `webrtc-sent-${Date.now()}.wav`);
+      const outboundFile = session.file('sent-audio.wav');
       saveReceivedAudio(frames, audioConfig, outboundFile);
       yield {
         type: 'info',
@@ -348,7 +353,7 @@ export async function* runWebRtcTest(config: WebRtcTestConfig): AsyncGenerator<T
     const responsePayloadsReceived = receivedPayloads.length - responsePayloadsBefore;
 
     if (responsePayloadsReceived > 0) {
-      const responseFile = resolve(audioDir, `webrtc-response-${Date.now()}.wav`);
+      const responseFile = session.file('agent-response.wav');
       savePayloadsAsWav(
         receivedPayloads.slice(responsePayloadsBefore),
         codec,
