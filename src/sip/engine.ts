@@ -134,12 +134,26 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
       }
     };
     
+    let timedOut = false;
+
     await new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        safeClose();
+        timedOut = true;
+        const hasFinalResponse = responses.some(r => r.statusCode >= 200);
+
         if (responses.length === 0) {
+          safeClose();
           reject(new Error('Request timeout'));
+        } else if (!hasFinalResponse && config.method === 'INVITE') {
+          // Got only provisional (1xx) responses — send CANCEL before closing
+          const cancelMessage = buildCancelRequest(config.uri, host, port, callId, fromTag, branch, publicIp, sipPort);
+          sipSocket.send(cancelMessage, port, host, () => {
+            // Wait briefly for 487 Request Terminated, then close
+            const cancelTimeout = setTimeout(() => { safeClose(); resolve(); }, 2000);
+            sipSocket.once('message', () => { clearTimeout(cancelTimeout); safeClose(); resolve(); });
+          });
         } else {
+          safeClose();
           resolve();
         }
       }, config.timeout);
@@ -147,7 +161,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
       sipSocket.on('message', (msg) => {
         const response = msg.toString();
         const statusMatch = response.match(/SIP\/2\.0 (\d+) (.+)/);
-        
+
         if (statusMatch) {
           const statusCode = parseInt(statusMatch[1]);
           const statusText = statusMatch[2].trim();
@@ -487,12 +501,44 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
       }
     }
 
+    // Detect unanswered INVITE: got provisional (1xx) but no final response
+    if (config.method === 'INVITE' && !inviteHandled && timedOut) {
+      const highestStatus = responses.length > 0
+        ? Math.max(...responses.map(r => r.statusCode))
+        : 0;
+
+      yield {
+        type: 'error',
+        timestamp: Date.now(),
+        message: `INVITE not answered: got ${highestStatus} (${responses.length} provisional) but no 200 OK within ${config.timeout}ms`,
+        severity: 'error',
+        code: 'INVITE_UNANSWERED',
+        recovery: highestStatus === 180
+          ? 'Got 180 Ringing — voice agent may not be running or dispatch rule is not matching. Check agent deployment and dispatch rules.'
+          : highestStatus === 100
+            ? 'Got 100 Trying — SIP proxy accepted but could not reach the agent. Check if the agent process is running.'
+            : 'No provisional response at all — check SIP URI, trunk configuration, and network connectivity.'
+      };
+
+      yield {
+        type: 'sip',
+        timestamp: Date.now(),
+        message: 'Sent CANCEL (unanswered INVITE)',
+        method: 'CANCEL'
+      };
+    }
+
     const duration = Date.now() - startTime;
+    const hasFinalSuccess = responses.some(r => r.statusCode >= 200 && r.statusCode < 300);
+    const succeeded = config.method === 'INVITE' ? inviteHandled : hasFinalSuccess;
 
     yield {
-      type: 'info',
+      type: succeeded ? 'info' : 'error',
       timestamp: Date.now(),
-      message: `Test completed successfully in ${duration}ms`
+      message: succeeded
+        ? `Test completed successfully in ${duration}ms`
+        : `Test failed after ${duration}ms`,
+      ...(succeeded ? {} : { severity: 'error' as const, code: timedOut ? 'TIMEOUT' : 'NO_SUCCESS_RESPONSE' })
     };
 
   } catch (error) {
@@ -566,6 +612,23 @@ function buildByeRequest(uri: string, host: string, port: number, callId: string
     `To: <${uri}>${toTag ? `;tag=${toTag}` : ''}`,
     `Call-ID: ${callId}`,
     `CSeq: 2 BYE`,
+    `Max-Forwards: 70`,
+    `User-Agent: Pinmoli/0.1.0`,
+    `Content-Length: 0`,
+    '',
+    ''
+  ].join('\r\n');
+}
+
+function buildCancelRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string, localIp: string, localPort: number): string {
+  // CANCEL reuses the INVITE's branch and CSeq number (RFC 3261 Section 9.1)
+  return [
+    `CANCEL ${uri} SIP/2.0`,
+    `Via: SIP/2.0/UDP ${localIp}:${localPort};branch=${branch}`,
+    `From: <sip:pinmoli@pinmoli.local>;tag=${fromTag}`,
+    `To: <${uri}>`,
+    `Call-ID: ${callId}`,
+    `CSeq: 1 CANCEL`,
     `Max-Forwards: 70`,
     `User-Agent: Pinmoli/0.1.0`,
     `Content-Length: 0`,

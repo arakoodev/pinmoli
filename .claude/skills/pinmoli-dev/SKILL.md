@@ -176,7 +176,7 @@ const closeSocket = () => {
 };
 ```
 
-## Lint Rules (14 rules in eslint-plugin-pinmoli.cjs)
+## Lint Rules (15 rules in eslint-plugin-pinmoli.cjs)
 
 ### Protocol Correctness
 - `no-unroutable-ip-fallback` -- 0.0.0.0/127.0.0.1 in SDP creates unroutable headers
@@ -185,6 +185,9 @@ const closeSocket = () => {
 - `no-hardcoded-payload-type` -- literal 0/8/9/111 in payloadType context; use codec.payloadType
 - `no-optional-codec-in-media` -- codec? or codec = default in media functions
 - `no-silent-transcode-fallback` -- transcode functions with identity fallback return
+
+### SIP Transaction Correctness
+- `require-cancel-with-invite` -- files that build INVITE requests must also handle CANCEL (RFC 3261 Section 9)
 
 ### Schema / LLM Correctness
 - `no-incomplete-enum-description` -- Type.Union descriptions must mention all Literal values; the LLM reads descriptions to decide valid inputs

@@ -813,6 +813,68 @@ const plugin = {
         };
       },
     },
+
+    /* ------------------------------------------------------------------ */
+    /* Rule 15 — pinmoli/require-cancel-with-invite                        */
+    /*                                                                    */
+    /* RFC 3261 Section 9: A UAC that gives up waiting for a final        */
+    /* response to an INVITE MUST send CANCEL. Without it, the server     */
+    /* keeps the transaction alive (retransmitting 180 Ringing) and the   */
+    /* agent slot stays occupied until the server's own timer fires.      */
+    /*                                                                    */
+    /* Origin: engine.ts sent INVITE, got 180 Ringing, timed out, and    */
+    /* just closed the socket. No CANCEL was sent. The engine then said   */
+    /* "Test completed successfully" despite the call never being         */
+    /* answered. The server kept retransmitting 180 for 32 seconds.       */
+    /* ------------------------------------------------------------------ */
+    'require-cancel-with-invite': {
+      meta: {
+        type: 'problem',
+        docs: {
+          description:
+            'Files that build INVITE requests must also handle CANCEL. ' +
+            'RFC 3261 requires CANCEL when giving up on a pending INVITE.',
+        },
+        schema: [],
+        messages: {
+          missingCancel:
+            'This file builds SIP INVITE requests but has no CANCEL handling. ' +
+            'RFC 3261 Section 9 requires sending CANCEL when a UAC gives up waiting ' +
+            'for a final response to INVITE. Without CANCEL, the proxy keeps the ' +
+            'transaction alive and the agent slot stays occupied.',
+        },
+      },
+      create(context) {
+        let hasInviteBuilder = false;
+        let hasCancelRef = false;
+
+        return {
+          // Detect functions that build INVITE requests
+          // Match: buildInviteRequest, or string literal 'INVITE' in a SIP message builder
+          FunctionDeclaration(node) {
+            if (node.id && /buildInvite/i.test(node.id.name)) {
+              hasInviteBuilder = true;
+            }
+          },
+          // Detect CANCEL references
+          Literal(node) {
+            if (typeof node.value === 'string' && /CANCEL/.test(node.value)) {
+              hasCancelRef = true;
+            }
+          },
+          Identifier(node) {
+            if (/cancel/i.test(node.name) && /build|send|Cancel/.test(node.name)) {
+              hasCancelRef = true;
+            }
+          },
+          'Program:exit'(node) {
+            if (hasInviteBuilder && !hasCancelRef) {
+              context.report({ node, messageId: 'missingCancel' });
+            }
+          },
+        };
+      },
+    },
   },
 };
 

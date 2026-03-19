@@ -1,7 +1,7 @@
 /**
  * ESLint flat config for Pinmoli.
  *
- * Includes eslint-plugin-pinmoli (local) — 14 rules extracted from
+ * Includes eslint-plugin-pinmoli (local) — 15 rules extracted from
  * real bugs made by Claude Code in this codebase.
  */
 
@@ -88,6 +88,7 @@ export default [
       'pinmoli/no-optional-codec-in-media': 'error',
       'pinmoli/no-silent-transcode-fallback': 'error',
       'pinmoli/no-incomplete-enum-description': 'error',
+      'pinmoli/require-cancel-with-invite': 'error',
     },
   },
 

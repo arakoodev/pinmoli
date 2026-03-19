@@ -499,6 +499,36 @@ describe('pinmoli/no-incomplete-enum-description', () => {
   });
 });
 
+// ---------- Rule 15: require-cancel-with-invite ----------
+
+describe('pinmoli/require-cancel-with-invite', () => {
+  it('flags files with INVITE builder but no CANCEL handling', () => {
+    ruleTester.run('require-cancel-with-invite', plugin.rules['require-cancel-with-invite'], {
+      valid: [
+        // File with both INVITE and CANCEL builders
+        `function buildInviteRequest(uri) { return "INVITE " + uri; }
+         function buildCancelRequest(uri) { return "CANCEL " + uri; }`,
+        // File with no INVITE builder — not our concern
+        `function buildOptionsRequest(uri) { return "OPTIONS " + uri; }`,
+        // File with INVITE and CANCEL string reference
+        `function buildInviteRequest(uri) { return "INVITE " + uri; }
+         const msg = "CANCEL " + uri;`,
+      ],
+      invalid: [
+        // The exact bug: INVITE builder without any CANCEL handling
+        {
+          code: `function buildInviteRequest(uri, host, port, callId) {
+            return "INVITE " + uri + " SIP/2.0";
+          }
+          function buildAckRequest(uri) { return "ACK " + uri; }
+          function buildByeRequest(uri) { return "BYE " + uri; }`,
+          errors: [{ messageId: 'missingCancel' }],
+        },
+      ],
+    });
+  });
+});
+
 // ---------- Rule 12: no-silent-transcode-fallback ----------
 
 describe('pinmoli/no-silent-transcode-fallback', () => {
