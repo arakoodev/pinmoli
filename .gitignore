@@ -10,3 +10,4 @@ tsconfig.tsbuildinfo
 secrets/
 gcp-service-account.json
 captures/
+.claude/projects/

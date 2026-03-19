@@ -59,8 +59,8 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
     const sipSocket = dgram.createSocket('udp4');
     const rtpSocket = dgram.createSocket('udp4');
 
-    // Get local IP for SDP and SIP headers (throws if no routable interface)
-    const { getLocalIp } = await import('../network/utils.js');
+    // Get local IP for fallback
+    const { getLocalIp, stunDiscoverAddress } = await import('../network/utils.js');
     const localIp = getLocalIp();
 
     // Bind SIP socket
@@ -72,7 +72,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
       });
     });
     const sipPort = sipSocket.address().port;
-    
+
     // Bind RTP socket to media port (use 0 if 10000 to avoid conflicts)
     const targetRtpPort = config.mediaPort === 10000 ? 0 : config.mediaPort;
     await new Promise<void>((resolve, reject) => {
@@ -82,12 +82,17 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         resolve();
       });
     });
-    const rtpPort = rtpSocket.address().port;
-    
+
+    // STUN-discover the RTP socket's NAT-mapped address.
+    // This is the address remote peers must send RTP to.
+    const stunResult = await stunDiscoverAddress(rtpSocket);
+    const publicIp = stunResult.ip;
+    const rtpPort = stunResult.port;
+
     yield {
       type: 'info',
       timestamp: Date.now(),
-      message: `SIP socket bound to ${localIp}:${sipPort}, RTP socket bound to port ${rtpPort}`
+      message: `SIP socket bound to ${localIp}:${sipPort}, RTP mapped to ${publicIp}:${rtpPort} (STUN)`
     };
 
     // Build SIP request
@@ -99,12 +104,12 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
     let sdp = '';
     
     if (config.method === 'OPTIONS') {
-      sipMessage = buildOptionsRequest(config.uri, host, port, callId, fromTag, branch, localIp, sipPort);
+      sipMessage = buildOptionsRequest(config.uri, host, port, callId, fromTag, branch, publicIp, sipPort);
     } else if (config.method === 'INVITE') {
-      sdp = generateSdp(config.codecs, rtpPort, localIp);
-      sipMessage = buildInviteRequest(config.uri, host, port, callId, fromTag, branch, sdp, localIp, sipPort);
+      sdp = generateSdp(config.codecs, rtpPort, publicIp);
+      sipMessage = buildInviteRequest(config.uri, host, port, callId, fromTag, branch, sdp, publicIp, sipPort);
     } else if (config.method === 'REGISTER') {
-      sipMessage = buildRegisterRequest(config.uri, host, port, callId, fromTag, branch, localIp, sipPort);
+      sipMessage = buildRegisterRequest(config.uri, host, port, callId, fromTag, branch, publicIp, sipPort);
     }
 
     yield {
@@ -229,7 +234,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         }
 
         // Send ACK (with To-tag from 200 OK per RFC 3261 Section 12.2.1.1)
-        const ackMessage = buildAckRequest(config.uri, host, port, callId, fromTag, toTag, branch, localIp, sipPort);
+        const ackMessage = buildAckRequest(config.uri, host, port, callId, fromTag, toTag, branch, publicIp, sipPort);
         yield {
           type: 'sip',
           timestamp: Date.now(),
@@ -293,21 +298,10 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           }
         }
 
-        // ---- Phase 2: Send audio + listen for reply ----
+        // ---- Phase 2: Send audio, then listen for reply ----
         const responseFile = resolve(audioDir, `agent-response-${Date.now()}.wav`);
 
-        yield {
-          type: 'info',
-          timestamp: Date.now(),
-          message: `Listening for agent response on port ${rtpPort} (${waitTime}s)...`
-        };
-
-        const rtpPromise = receiveRTPAudio(rtpSocket, waitTime, {
-          dtmfDetector,
-          acceptedPayloadTypes: [negotiatedCodec.payloadType],
-        });
-
-        // Send audio from the SAME socket (fixes port mismatch bug)
+        // Send audio FIRST (from the SAME socket — fixes port mismatch bug)
         let audioStreamState: RtpStreamState | undefined;
         if (pcmuData) {
           // Transcode PCMU audio to negotiated codec if needed
@@ -386,8 +380,19 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           };
         }
 
-        // Wait for receiver to finish (agent responds after we stop sending)
-        const { packetsReceived, audioData } = await rtpPromise;
+        // ---- Phase 3: Listen for agent response AFTER send completes ----
+        // Agent may take 15-20s to process audio and respond.
+        // Timer starts now (after send), so responseWaitTime is pure listen time.
+        yield {
+          type: 'info',
+          timestamp: Date.now(),
+          message: `Listening for agent response on port ${rtpPort} (${waitTime}s)...`
+        };
+
+        const { packetsReceived, audioData } = await receiveRTPAudio(rtpSocket, waitTime, {
+          dtmfDetector,
+          acceptedPayloadTypes: [negotiatedCodec.payloadType],
+        });
 
         if (packetsReceived > 0) {
           saveAsWAV(audioData, responseFile, negotiatedCodec);
@@ -439,7 +444,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
         };
 
         // Send BYE to hang up (with To-tag for dialog matching)
-        const byeMessage = buildByeRequest(config.uri, host, port, callId, fromTag, toTag, branch, localIp, sipPort);
+        const byeMessage = buildByeRequest(config.uri, host, port, callId, fromTag, toTag, branch, publicIp, sipPort);
         yield {
           type: 'sip',
           timestamp: Date.now(),

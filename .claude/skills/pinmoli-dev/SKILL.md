@@ -45,11 +45,14 @@ Agent Runtime (src/agent/runtime.ts)
 SIP Engine (src/sip/)              WebRTC Engine (src/webrtc/)
   - engine.ts: async generator       - engine.ts: async generator
   - protocol.ts: SIP messages        - whip.ts: WHIP signaling
-  - sdp.ts: SDP offer/answer         - audio-frames.ts: PCM16/WAV
+  - sdp.ts: SDP offer/answer         - audio-frames.ts: PCM16/OGG Opus/WAV
   - rtp-receiver.ts: RTP send/recv   - werift: pure TS WebRTC stack
   - codec.ts: codec table/transcode
   - dtmf.ts: RFC 4733 DTMF
   - audio.ts: sample resolution
+  |
+  v
+Network (src/network/utils.ts) -- STUN NAT discovery, getLocalIp(), getPublicIp()
   |
   v
 Storage (src/storage/db.ts) -- SQLite + FTS5
@@ -84,7 +87,9 @@ src/
 ├── webrtc/
 │   ├── engine.ts             # WebRTC test orchestration (async generator)
 │   ├── whip.ts               # WHIP signaling client (RFC 9725)
-│   └── audio-frames.ts       # PCM16 frame chunking + WAV save
+│   └── audio-frames.ts       # PCM16 frame chunking, OGG Opus decode, WAV save
+├── network/
+│   └── utils.ts              # STUN NAT discovery, getLocalIp(), getPublicIp()
 ├── storage/db.ts             # SQLite + FTS5 persistence
 ├── validation/schemas.ts     # TypeBox schemas
 └── commands/service-account.ts
@@ -131,7 +136,36 @@ SDP offer (PCMU, PCMA, G722, opus) → 200 OK with SDP answer
 → saveAsWAV uses codec.wavFormatCode, codec.sampleRate
 ```
 
-### 5. Socket Cleanup Guards
+### 5. STUN NAT Discovery for SDP
+WSL2/Docker private IPs (172.19.x.x) are unreachable from the internet. Use STUN to discover the public IP:port before building SDP.
+```typescript
+import { stunDiscoverAddress } from '../network/utils.js';
+
+// Discover public address through the ACTUAL RTP socket (not a separate one)
+const { ip: publicIp, port: mappedPort } = await stunDiscoverAddress(rtpSocket);
+// Use publicIp in SDP c= line AND SIP Via/Contact headers
+const sdp = generateSdp(codecs, mappedPort, publicIp);
+```
+Falls back to `getLocalIp()` if STUN times out (3s). Available via `getPublicIp()` for one-off lookups (creates a temporary socket).
+
+### 6. Send-Then-Listen Pattern
+`responseWaitTime` counts from AFTER send completes, not concurrently. The agent may take 15-20s to process audio.
+```typescript
+// CORRECT: sequential — full listen window after send
+await sendRTPFromSocket(socket, host, port, audioData, codec);
+const received = await receiveRTPAudio(socket, responseWaitTime, [codec.payloadType]);
+
+// WRONG: parallel — listen window overlaps with send, may miss response
+await Promise.all([
+  sendRTPFromSocket(socket, host, port, audioData, codec),
+  receiveRTPAudio(socket, responseWaitTime, [codec.payloadType])
+]);
+```
+
+### 7. Audio Capture to `captures/audio/`
+Received audio is saved to `captures/audio/` as WAV files. For WebRTC with opus codec, the OGG Opus decode pipeline in `audio-frames.ts` converts received opus payloads to PCM16 before saving.
+
+### 8. Socket Cleanup Guards
 ```typescript
 let socketClosed = false;
 const closeSocket = () => {
