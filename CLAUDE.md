@@ -55,7 +55,8 @@ docker compose build && docker compose up -d
 - **pinmoli**: Node.js 20 Alpine container with ffmpeg, espeak, tcpdump, tini. `network_mode: host` for SIP/RTP access. Automatic pcap capture via `entrypoint.sh`.
 
 ### Source (`src/`)
-- `cli.ts` — Entry point, CLI arg parsing, multi-provider auto-detection
+- `cli.ts` — Entry point, interactive TUI REPL, multi-provider auto-detection
+- `cli-pipe.ts` — Pipe mode entry point (stdin→agent→stdout, stderr tee)
 - `agent/runtime.ts` — AI agent setup (pi-agent-core, multi-provider via pi-ai)
 - `ui/tui.ts` — Terminal UI (pi-tui)
 - `tools/` — 7 tool implementations (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests)
@@ -67,8 +68,10 @@ docker compose build && docker compose up -d
 - `webrtc/engine.ts` — WebRTC test orchestration (async generator, mirrors SIP engine)
 - `webrtc/whip.ts` — WHIP signaling client (RFC 9725: HTTP POST offer → answer)
 - `webrtc/audio-frames.ts` — PCM16 frame chunking, OGG Opus builder/decoder, codec-aware WAV save
+- `network/utils.ts` — STUN NAT discovery (`stunDiscoverAddress()`), `getLocalIp()`, `getPublicIp()`
+- `network/session.ts` — Per-session directory creation, signaling log, metadata writer
 - `storage/db.ts` — SQLite + FTS5 persistence (save/load/list tools backed by this)
-- `validation/schemas.ts` — Input validation (TypeBox + Zod)
+- `validation/schemas.ts` — Input validation (TypeBox)
 
 ### Tests (`test/`)
 - `test/unit/` — Protocol, SDP, RTP, storage, validation, tools, eslint plugin, WebRTC WHIP, WebRTC engine
@@ -77,7 +80,7 @@ docker compose build && docker compose up -d
 
 ## Lint Rules (`eslint-plugin-pinmoli`)
 
-Custom ESLint plugin at `eslint-plugin-pinmoli.cjs` with 14 rules extracted from real bugs:
+Custom ESLint plugin at `eslint-plugin-pinmoli.cjs` with 15 rules extracted from real bugs:
 
 - **`pinmoli/no-console-in-lib`** — `console.*` in library code corrupts the TUI display
 - **`pinmoli/no-process-exit`** — `process.exit()` skips SIP cleanup (no BYE, no socket close)
@@ -93,6 +96,7 @@ Custom ESLint plugin at `eslint-plugin-pinmoli.cjs` with 14 rules extracted from
 - **`pinmoli/no-optional-codec-in-media`** — Optional `codec?` parameter in media functions hides bugs. Callers silently get wrong PCMU defaults
 - **`pinmoli/no-silent-transcode-fallback`** — Transcode functions must throw for unsupported codecs, not silently return input unchanged
 - **`pinmoli/no-incomplete-enum-description`** — TypeBox `Type.Union` descriptions must mention all `Type.Literal` values. The LLM reads descriptions to determine valid inputs; missing values cause the LLM to reject valid options
+- **`pinmoli/require-cancel-with-invite`** — Files that build INVITE requests must also handle CANCEL. RFC 3261 requires CANCEL when giving up on a pending INVITE
 
 Run `docker compose exec pinmoli npm run lint` before committing.
 
@@ -116,6 +120,9 @@ Run `docker compose exec pinmoli npm run lint` before committing.
 7. **Codec params are required in media functions** — `saveAsWAV`, `receiveRTPAudio`, `sendRTPFromSocket` all require explicit codec/acceptedPayloadTypes. Never default to PCMU. Lint rule: `pinmoli/no-optional-codec-in-media`
 8. **Transcode must throw for unsupported codecs** — `transcodePcmuTo()` throws for codecs without an encoder (e.g. opus). Never silently return input unchanged. Lint rule: `pinmoli/no-silent-transcode-fallback`
 9. **Schema descriptions must list all valid values** — TypeBox `Type.Union` descriptions are the primary way the LLM learns what a parameter accepts. If the description mentions only a subset, the LLM rejects the rest. Lint rule: `pinmoli/no-incomplete-enum-description`
+10. **Send CANCEL for unanswered INVITEs** — when INVITE times out with only provisional (1xx) responses, send CANCEL before closing sockets. RFC 3261 Section 9. Lint rule: `pinmoli/require-cancel-with-invite`
+11. **STUN before SDP** — always call `stunDiscoverAddress(rtpSocket)` from `src/network/utils.ts` before building SDP. Use the returned public IP:port for SDP `c=` line and SIP Via/Contact. WSL2/Docker private IPs are unreachable from the internet
+12. **Send audio then listen** — `responseWaitTime` counts from AFTER `sendRTPFromSocket()` completes, not concurrently. The agent may take 15-20s to process audio
 
 ## WebRTC / WHIP Architecture
 

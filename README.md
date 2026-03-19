@@ -41,7 +41,10 @@ Pinmoli: Running INVITE test against sip:+15551234567@trunk.example.com...
 - **Test persistence** -- save, load, and list test configurations backed by SQLite with FTS5 full-text search
 - **Works with any SIP or WebRTC endpoint** -- LiveKit, Daily.co, Twilio, Cloudflare, Asterisk, FreeSWITCH, or any RFC 3261/WHIP-compliant server
 - **Automatic packet capture** -- every session captures SIP signaling and RTP media to pcap (Wireshark-ready), fail-fast if volume not mounted
-- **Audio file capture** -- both engines save inbound (agent) and outbound (sent) audio as WAV to `captures/audio/`. WebRTC opus payloads decoded via OGG container + ffmpeg
+- **Per-session output directories** -- each test run creates `captures/{session-name}/` containing SIP signaling log, metadata JSON, and all audio WAV files grouped together
+- **Audio file capture** -- both engines save inbound (agent) and outbound (sent) audio as WAV into the session directory. WebRTC opus payloads decoded via OGG container + ffmpeg
+- **STUN NAT discovery** -- per-socket STUN binding discovers the public IP:port for SDP and SIP headers, essential for WSL2/Docker where local IPs are unroutable
+- **Pipe mode** -- `cli-pipe.ts` reads messages from stdin, streams responses to stdout; all tool output tees to stderr regardless of mode (TUI or pipe)
 - **Real codec negotiation** -- PCMU (G.711 u-law), PCMA (G.711 A-law), G722 (wideband), opus. Transcodes audio at send time to match the negotiated codec. Graceful degradation if outbound encode unsupported (e.g., SIP opus): warns and continues receive-only
 - **Runs in Docker** -- all dependencies (ffmpeg, espeak, tcpdump, tini) included, no local setup required
 
@@ -487,21 +490,44 @@ wireshark captures/pinmoli-20260305-143022.pcap
 
 Previous captures from earlier runs are preserved — new sessions create new pcap files with unique timestamps.
 
-### Audio Files
+### Session Directories
 
-Both engines save inbound and outbound audio as WAV files to `captures/audio/`:
+Each test run creates its own directory under `captures/` grouping all artifacts:
 
 ```bash
-ls captures/audio/
-# agent-greeting-1741856422000.wav   # SIP: agent's greeting (if sendDelay > 0)
-# agent-response-1741856435000.wav   # SIP: agent's response
-# sent-audio-1741856430000.wav       # SIP: outbound audio (transcoded to negotiated codec)
-# webrtc-greeting-1741856450000.wav  # WebRTC: agent greeting
-# webrtc-response-1741856465000.wav  # WebRTC: agent response
-# webrtc-sent-1741856460000.wav      # WebRTC: outbound audio
+ls captures/
+# sip-invite-trunk.example.com-20260319-181341/
+# sip-options-trunk.example.com-20260319-180000/
+# webrtc-whip-agent.example.com-20260319-182000/
+
+ls captures/sip-invite-trunk.example.com-20260319-181341/
+# sip-log.txt         # Every SIP message sent/received with ISO timestamps
+# metadata.json       # Config, duration, responses, codec, public IP, success/failure
+# agent-greeting.wav  # Agent's greeting audio (if sendDelay > 0)
+# sent-audio.wav      # Outbound audio (transcoded to negotiated codec)
+# agent-response.wav  # Agent's response audio
 ```
 
-WebRTC opus payloads are decoded via an OGG Opus container piped through ffmpeg. PCMU payloads are saved as mu-law WAV directly. Audio files persist alongside pcap captures in the same volume mount.
+WebRTC sessions use `signaling-log.txt` (WHIP offer/answer) instead of `sip-log.txt`. Opus payloads are decoded via an OGG Opus container piped through ffmpeg. Audio files persist alongside pcap captures in the same volume mount.
+
+### Pipe Mode
+
+For non-interactive use (scripting, CI, or piping from another process):
+
+```bash
+# Single message
+echo "test sip:+1234567890@host with OPTIONS" | \
+  docker compose exec -T pinmoli npx tsx src/cli-pipe.ts
+
+# Multi-turn conversation
+docker compose exec -T pinmoli npx tsx src/cli-pipe.ts <<'EOF'
+test sip:+1234567890@trunk.example.com with OPTIONS
+now try INVITE with PCMU, sendDelay 8, responseWaitTime 20
+analyze the failure
+EOF
+```
+
+Agent responses go to **stdout**, tool output and status go to **stderr**. The TUI mode also tees all output to stderr, so both modes produce capturable logs.
 
 ### Disable capture
 
@@ -519,7 +545,8 @@ docker run --rm -it --network host \
 ```
 pinmoli/
 ├── src/
-│   ├── cli.ts                  # Entry point, REPL loop
+│   ├── cli.ts                  # Entry point, interactive TUI REPL
+│   ├── cli-pipe.ts             # Pipe mode entry point (stdin→agent→stdout)
 │   ├── agent/runtime.ts        # PinmoliAgent wraps pi-agent-core
 │   ├── ui/
 │   │   ├── tui.ts              # PinmoliTUI wraps pi-tui
@@ -545,6 +572,9 @@ pinmoli/
 │   │   ├── engine.ts           # WebRTC test orchestration (async generator)
 │   │   ├── whip.ts             # WHIP signaling client (RFC 9725)
 │   │   └── audio-frames.ts     # PCM16 frames, OGG Opus decode, WAV save
+│   ├── network/
+│   │   ├── utils.ts            # STUN NAT discovery, getLocalIp(), getPublicIp()
+│   │   └── session.ts          # Per-session directory, signaling log, metadata
 │   ├── storage/db.ts           # SQLite + FTS5 persistence
 │   ├── validation/schemas.ts   # TypeBox schemas
 │   └── commands/service-account.ts
@@ -553,7 +583,7 @@ pinmoli/
 │   ├── unit/                   # Protocol, SDP, RTP, DTMF, storage, tools, lint, WebRTC
 │   ├── integration/            # TUI flows, e2e, bidirectional RTP, speech
 │   └── live/                   # Tests against real SIP and WebRTC endpoints
-├── eslint-plugin-pinmoli.cjs   # 14 lint rules from real bugs
+├── eslint-plugin-pinmoli.cjs   # 15 lint rules from real bugs
 ├── Dockerfile                  # Alpine + Node 20 + ffmpeg + espeak + tcpdump + tini
 ├── docker-compose.yml
 └── entrypoint.sh

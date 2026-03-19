@@ -189,6 +189,10 @@ export class PinmoliTUI {
   addMessage(role: 'user' | 'assistant' | 'system', content: string): void {
     this.messages.push({ role, content });
 
+    // Always tee to stderr (clean text, no ANSI)
+    const tag = role === 'user' ? 'You' : role === 'assistant' ? 'Pinmoli' : 'system';
+    process.stderr.write(`[${tag}] ${content}\n`);
+
     if (this.tui) {
       // Interactive mode: add as pi-tui Text component
       // Finalize any active tool output first
@@ -213,6 +217,9 @@ export class PinmoliTUI {
   }
 
   streamMessage(content: string): void {
+    // Always tee to stderr
+    process.stderr.write(content);
+
     if (this.tui) {
       // Interactive mode: append to active tool output section
       if (this.activeToolOutput) {
@@ -226,6 +233,9 @@ export class PinmoliTUI {
   }
 
   onToolStart(toolName: string): void {
+    // Always tee to stderr
+    process.stderr.write(`[tool:${toolName}]\n`);
+
     if (this.tui) {
       // Interactive mode: create collapsible section in chat
       this.stopThinking();
@@ -242,6 +252,9 @@ export class PinmoliTUI {
   }
 
   onToolEnd(success = true): void {
+    // Always tee to stderr
+    process.stderr.write(`[tool:done]\n`);
+
     if (this.tui) {
       // Interactive mode: collapse the section
       if (this.activeToolOutput) {
@@ -276,6 +289,9 @@ export class PinmoliTUI {
 
   appendAssistantStream(delta: string): void {
     this.streamingContent += delta;
+    // Always tee to stderr
+    process.stderr.write(delta);
+
     if (this.tui) {
       const prefix = '\x1b[1;34mPinmoli: \x1b[0m';
       this.streamingText?.setText(prefix + this.streamingContent);
@@ -289,6 +305,9 @@ export class PinmoliTUI {
     const content = this.streamingContent;
     this.streamingText = undefined;
     this.streamingContent = '';
+    // Always tee to stderr
+    process.stderr.write('\n');
+
     if (!this.tui) {
       this.terminal!.write('\n');
     }

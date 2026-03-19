@@ -62,7 +62,8 @@ Storage (src/storage/db.ts) -- SQLite + FTS5
 
 ```
 src/
-├── cli.ts                    # Entry point, CLI arg parsing, multi-provider
+├── cli.ts                    # Entry point, interactive TUI REPL
+├── cli-pipe.ts               # Pipe mode (stdin→agent→stdout, stderr tee)
 ├── agent/runtime.ts          # PinmoliAgent wraps pi-agent-core
 ├── ui/
 │   ├── tui.ts                # PinmoliTUI wraps pi-tui Terminal
@@ -89,7 +90,8 @@ src/
 │   ├── whip.ts               # WHIP signaling client (RFC 9725)
 │   └── audio-frames.ts       # PCM16 frame chunking, OGG Opus decode, WAV save
 ├── network/
-│   └── utils.ts              # STUN NAT discovery, getLocalIp(), getPublicIp()
+│   ├── utils.ts              # STUN NAT discovery, getLocalIp(), getPublicIp()
+│   └── session.ts            # Per-session directory, signaling log, metadata
 ├── storage/db.ts             # SQLite + FTS5 persistence
 ├── validation/schemas.ts     # TypeBox schemas
 └── commands/service-account.ts
