@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
-import { TestConfigSchema, SipEventSchema, type TestConfig, type SipEvent } from '../../src/validation/schemas.js';
+import { TestConfigSchema, ConfigSchema, SipEventSchema, type TestConfig, type SipEvent } from '../../src/validation/schemas.js';
 
 describe('TypeBox Schemas', () => {
   describe('TestConfigSchema', () => {
@@ -142,6 +142,57 @@ describe('TypeBox Schemas', () => {
       };
 
       expect(Value.Check(TestConfigSchema, config)).toBe(false);
+    });
+  });
+
+  describe('ConfigSchema', () => {
+    it('validates config with agent-only llm', () => {
+      const config = {
+        llm: { agent: { provider: 'anthropic', model: 'claude-sonnet-4-5' } },
+        sip: { defaultPort: 5060, timeout: 30000, maxDuration: 300 },
+        ui: { maxTimelineEvents: 1000 },
+      };
+      expect(Value.Check(ConfigSchema, config)).toBe(true);
+    });
+
+    it('validates config with tts and stt', () => {
+      const config = {
+        llm: {
+          agent: { provider: 'google-vertex', model: 'gemini-3.1-pro-preview' },
+          tts: { model: 'gemini-2.5-flash-tts' },
+          stt: { model: 'gemini-2.5-flash' },
+        },
+        sip: { defaultPort: 5060, timeout: 30000, maxDuration: 300 },
+        ui: { maxTimelineEvents: 1000 },
+      };
+      expect(Value.Check(ConfigSchema, config)).toBe(true);
+    });
+
+    it('validates config without tts/stt (optional)', () => {
+      const config = {
+        llm: { agent: { provider: 'openai', model: 'gpt-4o' } },
+        sip: { defaultPort: 5060, timeout: 30000, maxDuration: 300 },
+        ui: { maxTimelineEvents: 1000 },
+      };
+      expect(Value.Check(ConfigSchema, config)).toBe(true);
+    });
+
+    it('rejects config with flat llm (old format)', () => {
+      const config = {
+        llm: { provider: 'anthropic', model: 'claude-sonnet-4-5' },
+        sip: { defaultPort: 5060, timeout: 30000, maxDuration: 300 },
+        ui: { maxTimelineEvents: 1000 },
+      };
+      expect(Value.Check(ConfigSchema, config)).toBe(false);
+    });
+
+    it('rejects config with unknown provider', () => {
+      const config = {
+        llm: { agent: { provider: 'unknown', model: 'test' } },
+        sip: { defaultPort: 5060, timeout: 30000, maxDuration: 300 },
+        ui: { maxTimelineEvents: 1000 },
+      };
+      expect(Value.Check(ConfigSchema, config)).toBe(false);
     });
   });
 

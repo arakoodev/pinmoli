@@ -8,6 +8,7 @@
 import { PinmoliTUI } from './ui/tui.js';
 import { PinmoliAgent } from './agent/runtime.js';
 import { configureServiceAccount, isVertexConfigured } from './commands/service-account.js';
+import { initCliSession, initManifest } from './network/session.js';
 import { getEnvApiKey } from '@mariozechner/pi-ai';
 import type { KnownProvider } from '@mariozechner/pi-ai';
 import type { Config } from './validation/schemas.js';
@@ -17,7 +18,7 @@ const PROVIDER_DEFAULTS: Record<string, { model: string; envVar: string; display
   'anthropic':    { model: 'claude-sonnet-4-5',        envVar: 'ANTHROPIC_API_KEY',  display: 'Anthropic' },
   'openai':       { model: 'gpt-4o',                   envVar: 'OPENAI_API_KEY',     display: 'OpenAI' },
   'google':       { model: 'gemini-2.5-flash',         envVar: 'GEMINI_API_KEY',     display: 'Google Gemini' },
-  'google-vertex':{ model: 'gemini-2.5-flash',         envVar: '(service account)',   display: 'Google Vertex AI' },
+  'google-vertex':{ model: 'gemini-2.5-pro',            envVar: '(service account)',   display: 'Google Vertex AI' },
   'groq':         { model: 'llama-3.3-70b-versatile',  envVar: 'GROQ_API_KEY',       display: 'Groq' },
   'openrouter':   { model: 'anthropic/claude-sonnet-4.5', envVar: 'OPENROUTER_API_KEY', display: 'OpenRouter' },
 };
@@ -33,6 +34,7 @@ function isSupportedProvider(p: string): p is SupportedProvider {
 interface CliArgs {
   provider?: string;
   model?: string;
+  ttsModel?: string;
   serviceAccount?: string;
   help?: boolean;
 }
@@ -43,6 +45,7 @@ function printUsage() {
 Options:
   --provider <name>          LLM provider (${SUPPORTED_PROVIDERS.join(', ')})
   --model <id>               Model ID (default depends on provider)
+  --tts-model <id>           Gemini TTS model (default: gemini-2.5-flash-tts, Vertex AI only)
   --service-account <path>   GCP service account JSON (for google-vertex)
   --help                     Show this message
 
@@ -77,6 +80,9 @@ function parseArgs(): CliArgs {
         break;
       case '--model':
         result.model = args[++i];
+        break;
+      case '--tts-model':
+        result.ttsModel = args[++i];
         break;
       case '--service-account':
         result.serviceAccount = args[++i];
@@ -129,9 +135,10 @@ function handleSlashCommand(input: string, agent: PinmoliAgent, tui: PinmoliTUI,
   if (saMatch) {
     const result = configureServiceAccount(saMatch[1].trim());
     if (result.success) {
-      config.llm.provider = 'google-vertex';
-      config.llm.model = PROVIDER_DEFAULTS['google-vertex'].model;
-      agent.switchModel(config.llm.provider, config.llm.model);
+      config.llm.agent.provider = 'google-vertex';
+      config.llm.agent.model = PROVIDER_DEFAULTS['google-vertex'].model;
+      config.llm.tts = { model: 'gemini-2.5-flash-tts' };
+      agent.switchModel(config.llm.agent.provider, config.llm.agent.model);
       tui.addMessage('system', result.message);
     } else {
       tui.addMessage('system', `Error: ${result.message}`);
@@ -162,8 +169,8 @@ function handleSlashCommand(input: string, agent: PinmoliAgent, tui: PinmoliTUI,
     }
 
     const modelId = newModel || PROVIDER_DEFAULTS[newProvider].model;
-    config.llm.provider = newProvider;
-    config.llm.model = modelId;
+    config.llm.agent.provider = newProvider;
+    config.llm.agent.model = modelId;
     agent.switchModel(newProvider, modelId);
     tui.addMessage('system', `Switched to ${PROVIDER_DEFAULTS[newProvider].display}: ${modelId}`);
     return true;
@@ -171,8 +178,8 @@ function handleSlashCommand(input: string, agent: PinmoliAgent, tui: PinmoliTUI,
 
   // /model (no args) — show current model
   if (input === '/model') {
-    const info = PROVIDER_DEFAULTS[config.llm.provider];
-    tui.addMessage('system', `Current: ${info?.display || config.llm.provider} / ${config.llm.model}`);
+    const info = PROVIDER_DEFAULTS[config.llm.agent.provider];
+    tui.addMessage('system', `Current: ${info?.display || config.llm.agent.provider} / ${config.llm.agent.model}`);
     return true;
   }
 
@@ -249,14 +256,22 @@ async function main() {
 
   // Build config
   const config: Config = {
-    llm: { provider, model },
+    llm: {
+      agent: { provider, model },
+      ...(provider === 'google-vertex' ? { tts: { model: args.ttsModel || 'gemini-2.5-flash-tts' } } : {}),
+    },
     sip: { defaultPort: 5060, timeout: 30000, maxDuration: 300 },
     ui: { maxTimelineEvents: 1000 }
   };
 
+  // Create CLI session directory — all output scoped under it
+  const sessionRoot = initCliSession();
+  initManifest(provider, model);
+
   const info = PROVIDER_DEFAULTS[provider];
   console.log(`Provider: ${info.display}`);
   console.log(`Model: ${model}`);
+  console.log(`Session: ${sessionRoot}`);
   console.log('Initializing agent...');
 
   let tui: PinmoliTUI | undefined;

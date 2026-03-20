@@ -97,8 +97,8 @@ export class PinmoliAgent {
 
     // Get LLM model
     this.model = getModel(
-      config.llm.provider as KnownProvider,
-      config.llm.model as never,
+      config.llm.agent.provider as KnownProvider,
+      config.llm.agent.model as never,
     );
 
     // Create agent

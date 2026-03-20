@@ -1,8 +1,10 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { spawn } from 'child_process';
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
 import { resolve } from 'path';
+import { isVertexConfigured } from '../commands/service-account.js';
+import { getSessionRoot } from '../network/session.js';
 import { codecByName, CODEC_TABLE, type CodecInfo } from '../sip/codec.js';
 
 const GenerateAudioParamsSchema = Type.Object({
@@ -11,7 +13,7 @@ const GenerateAudioParamsSchema = Type.Object({
     Type.Literal('dtmf'),
     Type.Literal('silence'),
     Type.Literal('speech')
-  ], { description: 'Type of audio to generate: sine (pure tone), dtmf (dual-tone digits), silence, or speech (TTS via espeak).' }),
+  ], { description: 'Type of audio to generate: sine (pure tone), dtmf (dual-tone digits), silence, or speech (TTS via espeak or gemini).' }),
   filename: Type.String({ description: 'Output filename (without extension)' }),
   frequency: Type.Optional(Type.Number({
     minimum: 20,
@@ -36,6 +38,12 @@ const GenerateAudioParamsSchema = Type.Object({
     Type.Literal('G722'),
   ], {
     description: 'Audio codec for the generated WAV file: PCMU (mu-law 8kHz), PCMA (A-law 8kHz), or G722 (wideband 16kHz). Default: PCMU.'
+  })),
+  ttsProvider: Type.Optional(Type.Union([
+    Type.Literal('espeak'),
+    Type.Literal('gemini'),
+  ], {
+    description: 'TTS engine for speech generation: espeak (fast, offline) or gemini (high quality, Vertex AI). Default: espeak.'
   }))
 });
 
@@ -51,11 +59,11 @@ export const generateAudioTool: AgentTool = {
   parameters: GenerateAudioParamsSchema,
 
   async execute(toolCallId, params, signal, onUpdate) {
-    const { type, filename, frequency = 440, duration = 3, text, digits, codec: codecName } = params as GenerateAudioParams;
+    const { type, filename, frequency = 440, duration = 3, text, digits, codec: codecName, ttsProvider } = params as GenerateAudioParams;
     const codec: CodecInfo = codecName ? (codecByName(codecName) ?? CODEC_TABLE.PCMU) : CODEC_TABLE.PCMU;
 
-    // Ensure audio-samples directory exists
-    const samplesDir = resolve(process.cwd(), 'audio-samples');
+    // Save audio-samples under the CLI session directory
+    const samplesDir = resolve(getSessionRoot(), 'audio-samples');
     if (!existsSync(samplesDir)) {
       mkdirSync(samplesDir, { recursive: true });
     }
@@ -81,7 +89,7 @@ export const generateAudioTool: AgentTool = {
           success = await generateSilence(outputPath, duration, codec);
           break;
         case 'speech':
-          success = await generateSpeech(outputPath, text || 'Hello', codec);
+          success = await generateSpeech(outputPath, text || 'Hello', codec, ttsProvider);
           break;
       }
 
@@ -205,7 +213,42 @@ async function generateSilence(output: string, duration: number, codec: CodecInf
   });
 }
 
-async function generateSpeech(output: string, text: string, codec: CodecInfo): Promise<boolean> {
+async function generateSpeech(output: string, text: string, codec: CodecInfo, ttsProvider?: string): Promise<boolean> {
+  // Gemini TTS path — high quality, Vertex AI only
+  if (ttsProvider === 'gemini') {
+    if (!isVertexConfigured()) {
+      throw new Error('Gemini TTS requires Vertex AI. Configure with --service-account or GOOGLE_APPLICATION_CREDENTIALS.');
+    }
+    const { synthesizeSpeech, wrapMulawWav } = await import('../google/tts.js');
+    const samples = await synthesizeSpeech(text);
+
+    if (codec.name === 'PCMU') {
+      // Native MULAW — zero transcoding, direct WAV save
+      writeFileSync(output, wrapMulawWav(samples));
+      return true;
+    }
+
+    // Other codecs: save temp MULAW WAV, ffmpeg convert to target
+    const tmpFile = `/tmp/gemini-tts-${Date.now()}-${process.pid}.wav`;
+    writeFileSync(tmpFile, wrapMulawWav(samples));
+    try {
+      return await new Promise((resolve) => {
+        const ffmpeg = spawn('ffmpeg', [
+          '-i', tmpFile,
+          '-acodec', codec.ffmpegCodec, '-ar', String(codec.sampleRate), '-ac', '1', '-y',
+          output
+        ]);
+        ffmpeg.on('close', (code) => resolve(code === 0));
+        ffmpeg.on('error', () => resolve(false));
+        const timer = setTimeout(() => { ffmpeg.kill(); resolve(false); }, 10000);
+        timer.unref();
+      });
+    } finally {
+      try { unlinkSync(tmpFile); } catch { /* ignore */ }
+    }
+  }
+
+  // espeak path (default) — fast, offline
   return new Promise((resolve) => {
     // Use unique temp path to avoid collisions between concurrent generations
     const tmpFile = `/tmp/speech-${Date.now()}-${process.pid}.wav`;

@@ -197,19 +197,30 @@ export function isValidStoragePath(path: string): boolean {
   return path.startsWith(os.homedir() + '/.pinmoli/');
 }
 
+// LLM provider union (shared by agent config)
+const LlmProviderSchema = Type.Union([
+  Type.Literal('anthropic'),
+  Type.Literal('openai'),
+  Type.Literal('google'),
+  Type.Literal('google-vertex'),
+  Type.Literal('groq'),
+  Type.Literal('openrouter'),
+]);
+
 // Configuration schema
 export const ConfigSchema = Type.Object({
   llm: Type.Object({
-    provider: Type.Union([
-      Type.Literal('anthropic'),
-      Type.Literal('openai'),
-      Type.Literal('google'),
-      Type.Literal('google-vertex'),
-      Type.Literal('groq'),
-      Type.Literal('openrouter'),
-    ]),
-    model: Type.String(),
-    apiKey: Type.Optional(Type.String())
+    agent: Type.Object({
+      provider: LlmProviderSchema,
+      model: Type.String(),
+      apiKey: Type.Optional(Type.String())
+    }),
+    tts: Type.Optional(Type.Object({
+      model: Type.String(),
+    })),
+    stt: Type.Optional(Type.Object({
+      model: Type.String(),
+    })),
   }),
   sip: Type.Object({
     defaultPort: Type.Number({ default: 5060 }),

@@ -16,6 +16,7 @@
 import { createInterface } from 'readline';
 import { PinmoliAgent } from './agent/runtime.js';
 import { isVertexConfigured } from './commands/service-account.js';
+import { initCliSession, initManifest } from './network/session.js';
 import { getEnvApiKey } from '@mariozechner/pi-ai';
 import type { KnownProvider } from '@mariozechner/pi-ai';
 import type { Config } from './validation/schemas.js';
@@ -46,7 +47,7 @@ const PROVIDER_DEFAULTS: Record<string, { model: string; envVar: string; display
   'anthropic':    { model: 'claude-sonnet-4-5',        envVar: 'ANTHROPIC_API_KEY',  display: 'Anthropic' },
   'openai':       { model: 'gpt-4o',                   envVar: 'OPENAI_API_KEY',     display: 'OpenAI' },
   'google':       { model: 'gemini-2.5-flash',         envVar: 'GEMINI_API_KEY',     display: 'Google Gemini' },
-  'google-vertex':{ model: 'gemini-2.5-flash',         envVar: '(service account)',   display: 'Google Vertex AI' },
+  'google-vertex':{ model: 'gemini-2.5-pro',            envVar: '(service account)',   display: 'Google Vertex AI' },
   'groq':         { model: 'llama-3.3-70b-versatile',  envVar: 'GROQ_API_KEY',       display: 'Groq' },
   'openrouter':   { model: 'anthropic/claude-sonnet-4.5', envVar: 'OPENROUTER_API_KEY', display: 'OpenRouter' },
 };
@@ -64,9 +65,11 @@ async function main() {
   const args = process.argv.slice(2);
   let providerArg: string | undefined;
   let modelArg: string | undefined;
+  let ttsModelArg: string | undefined;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--provider') providerArg = args[++i];
     if (args[i] === '--model') modelArg = args[++i];
+    if (args[i] === '--tts-model') ttsModelArg = args[++i];
   }
 
   const provider = providerArg ?? autoDetectProvider();
@@ -77,12 +80,19 @@ async function main() {
 
   const model = modelArg ?? PROVIDER_DEFAULTS[provider]?.model ?? 'gemini-2.5-flash';
   const config: Config = {
-    llm: { provider: provider as Config['llm']['provider'], model },
+    llm: {
+      agent: { provider: provider as Config['llm']['agent']['provider'], model },
+      ...(provider === 'google-vertex' ? { tts: { model: ttsModelArg || 'gemini-2.5-flash-tts' } } : {}),
+    },
     sip: { defaultPort: 5060, timeout: 30000, maxDuration: 300 },
     ui: { maxTimelineEvents: 1000 },
   };
 
+  // Create CLI session directory — all output scoped under it
+  const sessionRoot = initCliSession();
+  initManifest(provider, model);
   process.stderr.write(`Pinmoli pipe mode — ${PROVIDER_DEFAULTS[provider]?.display ?? provider} / ${model}\n`);
+  process.stderr.write(`Session: ${sessionRoot}\n`);
 
   const agent = new PinmoliAgent(config, pipeTui);
 

@@ -16,9 +16,11 @@ describe('End-to-End Flow Tests', () => {
   beforeEach(() => {
     config = {
       llm: {
-        provider: 'anthropic',
-        model: 'claude-3-5-sonnet-20241022',
-        apiKey: 'test-key'
+        agent: {
+          provider: 'anthropic',
+          model: 'claude-3-5-sonnet-20241022',
+          apiKey: 'test-key'
+        },
       },
       sip: {
         defaultTimeout: 5000,

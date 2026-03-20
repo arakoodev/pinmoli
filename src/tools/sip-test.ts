@@ -6,6 +6,10 @@
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { TestConfigSchema, type SipEvent, type TestConfig } from '../validation/schemas.js';
 import { runSipTest } from '../sip/engine.js';
+import { buildFlowFromEvents, writeFlowJson } from '../network/flow.js';
+import { getSessionRoot } from '../network/session.js';
+import { basename, resolve } from 'path';
+import { readdirSync } from 'fs';
 
 export const sipTestTool: AgentTool = {
   name: 'sip_test',
@@ -80,10 +84,25 @@ Skip confirmation only if the user explicitly provided all parameters or said "u
         }
       }
       
+      // Write flow.json to the test session directory
+      const testDir = findTestDir(events);
+      if (testDir) {
+        const flow = buildFlowFromEvents(events, {
+          protocol: 'sip',
+          method: config.method,
+          uri: config.uri,
+        });
+        const sessionRoot = getSessionRoot();
+        const dirName = basename(testDir);
+        // Create a minimal session object for writeFlowJson
+        const flowSession = { file: (name: string) => resolve(testDir.startsWith('/') ? testDir : resolve(sessionRoot, dirName), name) } as { file: (name: string) => string };
+        writeFlowJson(flowSession as Parameters<typeof writeFlowJson>[0], flow);
+      }
+
       // Find final status
       const finalEvent = events[events.length - 1];
       const statusEvent = events.find(e => e.status);
-      
+
       let summary = '';
       if (finalEvent?.type === 'error') {
         summary = `❌ Test failed: ${finalEvent.message}`;
@@ -98,13 +117,13 @@ Skip confirmation only if the user explicitly provided all parameters or said "u
       } else {
         summary = 'Test completed';
       }
-      
+
       return {
         content: [{
           type: 'text',
           text: summary
         }],
-        details: { events, config, success: finalEvent?.type !== 'error' }
+        details: { events, config, success: finalEvent?.type !== 'error', testDir: testDir ? basename(testDir) : undefined }
       };
       
     } catch (error) {
@@ -115,16 +134,54 @@ Skip confirmation only if the user explicitly provided all parameters or said "u
         severity: 'fatal',
         code: 'SIP_ERROR'
       };
-      
+
       events.push(errorEvent);
-      
+
+      // Write flow.json even on error
+      const testDir = findTestDir(events);
+      if (testDir) {
+        const flow = buildFlowFromEvents(events, {
+          protocol: 'sip',
+          method: config.method,
+          uri: config.uri,
+        });
+        const flowSession = { file: (name: string) => resolve(testDir, name) } as Parameters<typeof writeFlowJson>[0];
+        writeFlowJson(flowSession, flow);
+      }
+
       return {
         content: [{
           type: 'text',
           text: `❌ Test failed: ${errorEvent.message}`
         }],
-        details: { events, config, success: false }
+        details: { events, config, success: false, testDir: testDir ? basename(testDir) : undefined }
       };
     }
   }
 };
+
+/**
+ * Find the test session directory from engine events.
+ * The SIP engine emits "session: <name>" in its info events.
+ */
+function findTestDir(events: SipEvent[]): string | undefined {
+  for (const ev of events) {
+    if (ev.type === 'info' && ev.message.includes('session:')) {
+      // "Test completed successfully in 1234ms — session: /app/captures/..."
+      // or "Resolved: host:port — session: sip-invite-host-20260320-065114"
+      const match = ev.message.match(/session:\s+(.+?)$/);
+      if (match) return match[1].trim();
+    }
+  }
+  // Fallback: scan session root for most recent sip-* dir
+  try {
+    const root = getSessionRoot();
+    const dirs = readdirSync(root, { withFileTypes: true })
+      .filter(d => d.isDirectory() && d.name.startsWith('sip-'))
+      .map(d => d.name)
+      .sort()
+      .reverse();
+    if (dirs.length > 0) return resolve(root, dirs[0]);
+  } catch { /* no captures dir */ }
+  return undefined;
+}
