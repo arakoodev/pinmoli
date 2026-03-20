@@ -56,7 +56,8 @@ Returns a stream of SIP events:
 - DTMF digits sent and detected (RFC 4733 telephone-event)
 - Codec negotiation results
 - Timing information for each step
-- Audio files saved to `captures/audio/` (inbound agent audio + outbound sent audio)
+- Audio files saved to session directory (inbound agent audio + outbound sent audio)
+- `flow.json` — structured signaling flow for replay comparison
 - Graceful degradation: if outbound codec encode is unsupported (e.g., opus), continues receive-only with a warning
 
 ---
@@ -106,7 +107,8 @@ Returns a stream of test events:
 - ICE connectivity checks and DTLS handshake
 - RTP send/receive statistics
 - DTMF digits sent and detected
-- Audio files saved to `captures/audio/` (inbound agent audio + outbound sent audio)
+- Audio files saved to session directory (inbound agent audio + outbound sent audio)
+- `flow.json` — structured signaling flow for replay comparison
 - Opus RTP payloads decoded via OGG container + ffmpeg; PCMU saved as mu-law WAV
 
 ---
@@ -126,6 +128,7 @@ Generate custom audio samples at runtime using ffmpeg and espeak.
 | `text` | string | no | -- | Text to synthesize (required for `speech` type) |
 | `digits` | string | no | -- | DTMF digits to generate: `0-9`, `*`, `#` |
 | `codec` | enum | no | `PCMU` | Output codec: `PCMU` (mu-law 8kHz), `PCMA` (A-law 8kHz), or `G722` (wideband 16kHz) |
+| `ttsProvider` | enum | no | `espeak` | TTS engine for speech: `espeak` (fast, offline) or `gemini` (high quality, Vertex AI) |
 
 ### Audio Types
 
@@ -138,6 +141,8 @@ Generate custom audio samples at runtime using ffmpeg and espeak.
 
 Default output is PCMU @ 8kHz mono (G.711 u-law). Use the `codec` parameter for PCMA or G722 output.
 
+> **Note:** Gemini TTS requires Vertex AI (service account). The `GEMINI_API_KEY` path does not support TTS. Gemini TTS returns native MULAW at 8kHz -- zero transcoding for SIP PCMU.
+
 ### Examples
 
 ```
@@ -147,6 +152,7 @@ Default output is PCMU @ 8kHz mono (G.711 u-law). Use the `codec` parameter for 
 "Make 5 seconds of silence"
 "Generate a greeting in PCMA format for A-law testing"
 "Create a G722 wideband tone for high-quality codec tests"
+"Generate speech with gemini saying 'Hello, I need help with my account'"
 ```
 
 ---
@@ -326,24 +332,37 @@ You: Run 'livekit-agent-check'
 
 ---
 
-## Audio Capture
+## Session Artifacts
 
-Both engines automatically save inbound and outbound audio as WAV files to `captures/audio/`:
+Each test run creates a per-session directory under `captures/{session-id}/` containing:
 
-| File pattern | Source | Description |
-|-------------|--------|-------------|
-| `agent-greeting-*.wav` | SIP | Agent's greeting (when `sendDelay > 0`) |
-| `agent-response-*.wav` | SIP | Agent's response after your audio |
-| `sent-audio-*.wav` | SIP | Audio you sent (transcoded to negotiated codec) |
-| `webrtc-greeting-*.wav` | WebRTC | Agent greeting |
-| `webrtc-response-*.wav` | WebRTC | Agent response |
-| `webrtc-sent-*.wav` | WebRTC | Outbound audio |
+| File | Description |
+|------|-------------|
+| `sip-log.txt` / `signaling-log.txt` | Every SIP/WHIP message sent/received with ISO timestamps |
+| `metadata.json` | Config, duration, responses, codec, public IP, success/failure |
+| `flow.json` | Structured signaling flow (for replay comparison) |
+| `agent-greeting.wav` | Agent's greeting audio (SIP, when `sendDelay > 0`) |
+| `sent-audio.wav` | Outbound audio (transcoded to negotiated codec) |
+| `agent-response.wav` | Agent's response audio |
 
-WebRTC codec handling:
-- **opus**: Raw RTP payloads wrapped in an OGG Opus container (RFC 7845), decoded to PCM16 WAV via ffmpeg
+The `manifest.json` at the session root records every tool call the LLM made, enabling replay mode.
+
+### Audio Codec Handling
+
+- **WebRTC opus**: Raw RTP payloads wrapped in an OGG Opus container (RFC 7845), decoded to PCM16 WAV via ffmpeg
 - **PCMU**: Saved directly as mu-law WAV (format code 7)
+- **PCMA**: Saved as A-law WAV
+- **G722**: Decoded via ffmpeg
 
-SIP codec handling uses the existing `saveAsWAV()` which supports PCMU, PCMA (A-law WAV), and G722 (ffmpeg decode).
+### Replay Workflow
+
+Re-execute a recorded session without the LLM and compare flows:
+
+```bash
+npx tsx src/cli-replay.ts captures/<session-id>
+```
+
+Compares original vs replay: signaling sequence, timing delta, RTP packet counts, codec negotiation.
 
 ---
 

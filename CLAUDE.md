@@ -57,6 +57,7 @@ docker compose build && docker compose up -d
 ### Source (`src/`)
 - `cli.ts` — Entry point, interactive TUI REPL, multi-provider auto-detection
 - `cli-pipe.ts` — Pipe mode entry point (stdin→agent→stdout, stderr tee)
+- `cli-replay.ts` — Replay mode CLI: re-execute recorded sessions without LLM, compare flow.json
 - `agent/runtime.ts` — AI agent setup (pi-agent-core, multi-provider via pi-ai)
 - `ui/tui.ts` — Terminal UI (pi-tui)
 - `tools/` — 7 tool implementations (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests)
@@ -68,8 +69,12 @@ docker compose build && docker compose up -d
 - `webrtc/engine.ts` — WebRTC test orchestration (async generator, mirrors SIP engine)
 - `webrtc/whip.ts` — WHIP signaling client (RFC 9725: HTTP POST offer → answer)
 - `webrtc/audio-frames.ts` — PCM16 frame chunking, OGG Opus builder/decoder, codec-aware WAV save
+- `google/auth.ts` — Google Cloud OAuth2 via service account JWT (zero npm deps, `crypto.createSign`)
+- `google/gemini-rest.ts` — Vertex AI `generateContent` REST client (shared by TTS and future STT)
+- `google/tts.ts` — Gemini TTS: `synthesizeSpeech()` returns raw MULAW, `wrapMulawWav()` for WAV container
 - `network/utils.ts` — STUN NAT discovery (`stunDiscoverAddress()`), `getLocalIp()`, `getPublicIp()`
-- `network/session.ts` — Per-session directory creation, signaling log, metadata writer
+- `network/session.ts` — Per-session directory, signaling log, metadata, manifest (SessionManifest/ToolCallRecord for replay)
+- `network/flow.ts` — Flow recording from engine TestEvents: `buildFlowFromEvents()` → FlowRecord, `writeFlowJson()`, `readFlowJson()`, `compareFlows()`
 - `storage/db.ts` — SQLite + FTS5 persistence (save/load/list tools backed by this)
 - `validation/schemas.ts` — Input validation (TypeBox)
 

@@ -31,488 +31,171 @@ Pinmoli: Running INVITE test against sip:+15551234567@trunk.example.com...
 
 ## Features
 
-- **Natural language interface** -- describe tests in plain English, the AI agent translates to protocol operations
-- **Full SIP call flows** -- OPTIONS pings, INVITE with SDP offer/answer, REGISTER with auth, ACK, BYE
-- **WebRTC via WHIP** -- connect to any WHIP endpoint (LiveKit, Cloudflare, Janus), negotiate ICE/DTLS/SRTP, send and receive audio
-- **Bidirectional RTP audio** -- send pre-generated or custom speech, receive and measure agent responses
-- **DTMF send and receive (RFC 4733)** -- send telephone-event RTP packets during active calls, detect incoming DTMF from the remote side
-- **Runtime speech synthesis** -- generate custom TTS audio on the fly with espeak
+- **Natural language interface** -- describe tests in plain English
+- **Full SIP call flows** -- OPTIONS, INVITE with SDP, REGISTER with auth, ACK, BYE
+- **WebRTC via WHIP** -- connect to any WHIP endpoint (LiveKit, Cloudflare, Janus)
+- **Bidirectional RTP audio** -- send speech, receive and measure agent responses
+- **DTMF send and receive (RFC 4733)** -- navigate IVR menus, detect incoming DTMF
+- **Runtime speech synthesis** -- espeak (offline) or Gemini TTS (high quality, Vertex AI)
+- **Real codec negotiation** -- PCMU, PCMA, G722, opus with automatic transcoding
 - **Failure analysis** -- pattern-matched diagnostics with actionable recovery steps
-- **Test persistence** -- save, load, and list test configurations backed by SQLite with FTS5 full-text search
-- **Works with any SIP or WebRTC endpoint** -- LiveKit, Daily.co, Twilio, Cloudflare, Asterisk, FreeSWITCH, or any RFC 3261/WHIP-compliant server
-- **Automatic packet capture** -- every session captures SIP signaling and RTP media to pcap (Wireshark-ready), fail-fast if volume not mounted
-- **Per-session output directories** -- each test run creates `captures/{session-name}/` containing SIP signaling log, metadata JSON, and all audio WAV files grouped together
-- **Audio file capture** -- both engines save inbound (agent) and outbound (sent) audio as WAV into the session directory. WebRTC opus payloads decoded via OGG container + ffmpeg
-- **STUN NAT discovery** -- per-socket STUN binding discovers the public IP:port for SDP and SIP headers, essential for WSL2/Docker where local IPs are unroutable
-- **Pipe mode** -- `cli-pipe.ts` reads messages from stdin, streams responses to stdout; all tool output tees to stderr regardless of mode (TUI or pipe)
-- **Real codec negotiation** -- PCMU (G.711 u-law), PCMA (G.711 A-law), G722 (wideband), opus. Transcodes audio at send time to match the negotiated codec. Graceful degradation if outbound encode unsupported (e.g., SIP opus): warns and continues receive-only
-- **Runs in Docker** -- all dependencies (ffmpeg, espeak, tcpdump, tini) included, no local setup required
-
-## Architecture
-
-Pinmoli is built on [pi](https://github.com/badlogic/pi-mono), the same open-source agent framework that powers [OpenClaw](https://github.com/openclaw/openclaw). Where OpenClaw uses pi to build a general-purpose personal AI assistant (messaging gateway, file operations, shell commands across 50+ integrations), Pinmoli takes the opposite approach: a **domain-restricted agent** that does exactly one thing -- SIP/WebRTC testing -- and does it well.
-
-The key difference is scope. OpenClaw embeds `pi-coding-agent` to give an LLM full access to read, write, edit, and bash tools across an entire system. Pinmoli uses only `pi-agent-core` and `pi-ai` with a locked-down tool allowlist of 7 voice-testing tools. The LLM cannot touch the filesystem, run shell commands, or do anything outside voice protocol testing.
-
-### Pi libraries
-
-```
-pi-ai                              pi-tui
-Multi-provider LLM abstraction     Terminal UI with diff rendering
-Anthropic, OpenAI, Google,         Editor, Markdown, Box, Text
-Bedrock, Mistral, Groq, ...       Keyboard input, layout engine
-         │                                   │
-         ▼                                   ▼
-pi-agent-core                      Pinmoli TUI (src/ui/tui.ts)
-Agent loop, tool execution,        Wraps pi-tui for interactive mode
-event subscription, AbortSignal    Falls back to raw Terminal for tests
-         │
-         ▼
-PinmoliAgent (src/agent/runtime.ts)
-Domain-restricted system prompt
-7-tool allowlist, event routing
-```
-
-Pinmoli uses three pi packages:
-
-| Package | Role in Pinmoli |
-|---------|----------------|
-| [`@mariozechner/pi-agent-core`](https://www.npmjs.com/package/@mariozechner/pi-agent-core) | Agent loop -- receives user input, calls LLM, executes tools, streams events back |
-| [`@mariozechner/pi-ai`](https://www.npmjs.com/package/@mariozechner/pi-ai) | LLM provider abstraction -- swap between Gemini, Claude, GPT with one config change |
-| [`@mariozechner/pi-tui`](https://www.npmjs.com/package/@mariozechner/pi-tui) | Terminal rendering -- differential updates, editor with autocomplete, flicker-free output |
-
-### How the pieces connect
-
-```
-User input
-  │
-  ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  TUI  (src/ui/tui.ts)                                           │
-│  pi-tui Editor → reads input → sends to agent                   │
-│  Agent events → streamed back → rendered in real time            │
-│  Ctrl+C: abort current operation / clear input / quit            │
-└──────────────────────┬───────────────────────────────────────────┘
-                       │
-                       ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  Agent  (src/agent/runtime.ts)                                   │
-│  pi-agent-core Agent with pi-ai model                            │
-│                                                                  │
-│  System prompt constrains LLM to SIP testing only:               │
-│  "You are Pinmoli, a SIP/WebRTC testing assistant.               │
-│   You ONLY help test voice protocols.                            │
-│   You CANNOT edit files, run bash, or access the filesystem."    │
-│                                                                  │
-│  Tool allowlist enforced by registry (src/tools/registry.ts):    │
-│  sip_test, webrtc_test, generate_audio, analyze_failure,         │
-│  save_test, load_test, list_tests                                │
-└──────────────────────┬───────────────────────────────────────────┘
-                       │  LLM decides which tool to call
-                       ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  Tools  (src/tools/*.ts)                                         │
-│                                                                  │
-│  sip_test ─────► SIP Engine (async generator, streams events)    │
-│  webrtc_test ──► WebRTC Engine (WHIP signaling, werift stack)    │
-│  generate_audio ► ffmpeg/espeak (sine, DTMF, silence, speech)    │
-│  analyze_failure ► Pattern matching on event history             │
-│  save/load/list ► SQLite with FTS5 (src/storage/db.ts)           │
-└──────────────────────┬───────────────────────────────────────────┘
-                       │
-                       ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  SIP Engine  (src/sip/engine.ts)                                 │
-│                                                                  │
-│  async function* runSipTest(config): AsyncGenerator<SipEvent>    │
-│                                                                  │
-│  ┌─ protocol.ts ── SIP message builder (INVITE, ACK, BYE)       │
-│  ├─ sdp.ts ─────── SDP offer/answer (opus, PCMU, PCMA, G722)    │
-│  ├─ rtp-receiver.ts ── RTP/DTMF send/receive on UDP socket      │
-│  ├─ dtmf.ts ───── RFC 4733 encode/decode, DtmfDetector          │
-│  └─ audio.ts ───── Sample resolution (WAV files, generated)      │
-│                                                                  │
-│  Yields events as they happen:                                   │
-│    SIP messages, RTP stats, DTMF, diagnostics, codec negotiation │
-└──────────────────────────────────────────────────────────────────┘
-                       │
-                       ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  WebRTC Engine  (src/webrtc/engine.ts)                           │
-│                                                                  │
-│  async function* runWebRtcTest(config): AsyncGenerator<TestEvent>│
-│                                                                  │
-│  ┌─ whip.ts ───── WHIP signaling (RFC 9725: POST offer→answer)  │
-│  ├─ audio-frames.ts ── PCM16 frames, OGG Opus builder, WAV save │
-│  └─ werift ────── Pure TS WebRTC stack (ICE/DTLS/SRTP/RTP)      │
-│                                                                  │
-│  Yields events as they happen:                                   │
-│    WHIP signaling, ICE/DTLS, RTP stats, DTMF, agent audio       │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-### Why async generators
-
-The SIP engine is an `async function*` that yields events as they happen -- a SIP `100 Trying` at 12ms, a `200 OK` at 1200ms, RTP packet counts every second. The TUI renders each event the moment it arrives. No buffering, no callbacks, no polling.
-
-```typescript
-// The engine yields events in real time
-for await (const event of runSipTest(config)) {
-  tui.render(event);  // instant display
-}
-```
-
-This design makes the engine usable outside the TUI too -- pipe events to NDJSON, feed them into a test assertion, or stream them over a websocket.
-
-### Why domain restriction matters
-
-General-purpose agents (like OpenClaw) give the LLM access to bash, file I/O, and the full system. That power makes sense for a personal assistant. For a SIP testing tool, it's a liability -- you don't want an LLM accidentally `rm -rf`-ing your project while trying to debug a codec mismatch.
-
-Pinmoli's agent can only call 7 tools, all voice-testing related. The system prompt explicitly forbids filesystem access, and the tool registry enforces the allowlist at runtime. The LLM stays in its lane.
+- **Test persistence** -- save, load, list test configs (SQLite + FTS5)
+- **Per-session output** -- each run creates a directory with signaling logs, metadata, flow.json, audio WAVs
+- **Session replay** -- re-execute recorded sessions without LLM, compare flows
+- **Automatic packet capture** -- SIP + RTP traffic to pcap (Wireshark-ready)
+- **Pipe mode** -- stdin/stdout for scripting and CI
+- **STUN NAT discovery** -- public IP:port for SDP, works in WSL2/Docker
+- **Runs in Docker** -- ffmpeg, espeak, tcpdump, tini included
 
 ## Quick Start
 
 ### Prerequisites
 
 - Docker
-- An LLM provider credential (GCP service account key for Gemini, or an API key for Anthropic/OpenAI)
+- An LLM provider credential (see below)
 
-### Quick Start (GHCR)
+### Google Vertex AI (Recommended)
 
-Pull the published image and run with any supported LLM provider:
+Vertex AI gives you Gemini as the LLM provider plus Gemini TTS for high-quality speech generation. The docker-compose.yml is pre-configured -- just drop in a service account key.
+
+**1. Create a service account:**
+
+```bash
+# In Google Cloud Console or via gcloud:
+gcloud iam service-accounts create pinmoli \
+  --display-name="Pinmoli SIP Tester"
+
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+  --member="serviceAccount:pinmoli@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/aiplatform.user"
+
+gcloud iam service-accounts keys create secrets/gcp-service-account.json \
+  --iam-account=pinmoli@YOUR_PROJECT_ID.iam.gserviceaccount.com
+```
+
+**2. Place the JSON key:**
+
+```bash
+mkdir -p secrets
+# Move your downloaded key to:
+# secrets/gcp-service-account.json
+```
+
+**3. Set your project (if not `lifeandhalf-24122025`):**
+
+Create or edit `.env`:
+
+```bash
+GOOGLE_CLOUD_PROJECT=your-project-id
+# GOOGLE_CLOUD_LOCATION=us-central1  # default, change if needed
+```
+
+**4. Start Pinmoli:**
+
+```bash
+docker compose build
+docker compose up -d
+docker compose exec pinmoli npx tsx src/cli.ts --service-account /app/secrets/gcp-service-account.json
+```
+
+The `docker-compose.yml` maps `secrets/` into the container at `/app/secrets/` (via the `.:/app` bind mount) and sets `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_CLOUD_PROJECT`, and `GOOGLE_CLOUD_LOCATION` automatically.
+
+### Other Providers
+
+Set one environment variable and Pinmoli auto-detects the provider:
+
+**Anthropic:**
+```bash
+echo "ANTHROPIC_API_KEY=sk-ant-..." >> .env
+docker compose exec pinmoli npx tsx src/cli.ts
+```
+
+**OpenAI:**
+```bash
+echo "OPENAI_API_KEY=sk-..." >> .env
+docker compose exec pinmoli npx tsx src/cli.ts
+```
+
+**Google Gemini (API key):**
+```bash
+echo "GEMINI_API_KEY=..." >> .env
+docker compose exec pinmoli npx tsx src/cli.ts
+```
+
+> **Note:** The Gemini API key path does not support TTS. Use Vertex AI (service account) for Gemini TTS.
+
+**Groq:**
+```bash
+echo "GROQ_API_KEY=gsk_..." >> .env
+docker compose exec pinmoli npx tsx src/cli.ts
+```
+
+**OpenRouter:**
+```bash
+echo "OPENROUTER_API_KEY=..." >> .env
+docker compose exec pinmoli npx tsx src/cli.ts
+```
+
+### Pre-built Image (GHCR)
 
 ```bash
 docker pull ghcr.io/arakoodev/pinmoli:latest
 ```
 
-**Anthropic:**
+Run with any provider:
 
 ```bash
+# Anthropic
 docker run --rm -it --network host \
   -v $(pwd)/captures:/app/captures \
   -e ANTHROPIC_API_KEY=sk-ant-... \
   ghcr.io/arakoodev/pinmoli
-```
 
-**OpenAI:**
-
-```bash
+# OpenAI
 docker run --rm -it --network host \
   -v $(pwd)/captures:/app/captures \
   -e OPENAI_API_KEY=sk-... \
   ghcr.io/arakoodev/pinmoli
-```
 
-**Google Gemini (API key):**
-
-```bash
+# Google Gemini (API key)
 docker run --rm -it --network host \
   -v $(pwd)/captures:/app/captures \
   -e GEMINI_API_KEY=... \
   ghcr.io/arakoodev/pinmoli
-```
 
-**Google Vertex AI (service account):**
-
-```bash
+# Google Vertex AI (service account)
 docker run --rm -it --network host \
   -v $(pwd)/captures:/app/captures \
   -v /path/to/key.json:/credentials.json:ro \
   ghcr.io/arakoodev/pinmoli --service-account /credentials.json
-```
 
-**Groq:**
-
-```bash
+# Groq
 docker run --rm -it --network host \
   -v $(pwd)/captures:/app/captures \
   -e GROQ_API_KEY=gsk_... \
   ghcr.io/arakoodev/pinmoli
 ```
 
-The provider is auto-detected from whichever env var you set. Use `--provider` to override.
+The `-v $(pwd)/captures:/app/captures` mount persists packet captures and session output to your local machine. The image is published automatically on every push to `main` via [GitHub Actions](./.github/workflows/docker-publish.yml).
 
-The image is published automatically on every push to `main` via [GitHub Actions](./.github/workflows/docker-publish.yml). Tagged releases (`v*`) produce versioned images (e.g., `ghcr.io/arakoodev/pinmoli:0.2.0`).
+## Usage
 
-### Development
-
-For contributors building from source:
+### Interactive TUI
 
 ```bash
-git clone git@github.com:arakoodev/pinmoli.git
-cd pinmoli
-docker compose build
-docker compose up -d
-
-# Start the TUI
 docker compose exec pinmoli npx tsx src/cli.ts
-
-# With a GCP service account
-docker compose exec pinmoli npx tsx src/cli.ts \
-  --service-account /app/secrets/my-key.json
 ```
 
-The source directory is bind-mounted, so code changes are reflected immediately.
-
-### Try it
-
-You're in. Type a test request. Every example below has a corresponding integration test in `test/integration/readme-prompts.test.ts`.
-
-**SIP basics:**
-
-```
-You: Send OPTIONS to sip:trunk.example.com
-You: INVITE sip:+15551234567@sip.livekit.cloud with opus and PCMU
-You: Register at sip:pbx.example.com with username admin password secret
-```
-
-**Codec negotiation:**
-
-```
-You: Test with PCMA codec -- I want to verify A-law support
-You: Call the agent using G722 and wait 20 seconds for a response
-You: Test sip:pbx.example.com offering only PCMA and PCMU, see which it picks
-```
-
-**DTMF and IVR navigation:**
-
-```
-You: Call sip:+15551234567@trunk.example.com and press 1-2-3-# after the greeting
-You: Call sip:+18005551234@trunk.example.com, press 1 for sales, then 0 for operator
-You: Connect via WebRTC to https://agent.example.com/whip and enter PIN 1234#
-```
-
-**Speech generation:**
-
-```
-You: Generate speech saying "What is the weather today?" then call the agent
-You: Generate a 1000Hz sine wave for 5 seconds, then test the endpoint
-You: Make the greeting say "Por favor espere" in Spanish, then test
-```
-
-**Bidirectional conversations:**
-
-```
-You: Call sip:agent@example.com, listen for 5 seconds first, then send my greeting
-You: INVITE sip:agent@livekit.cloud, send the greeting, wait 30 seconds for a response
-```
-
-**WebRTC:**
-
-```
-You: Test the WHIP endpoint at https://my-agent.example.com/whip with bearer token abc123
-```
-
-**Failure analysis:**
-
-```
-You: Why did it fail?
-You: What went wrong? (after a 488 codec mismatch)
-```
-
-**Save, load, and batch:**
-
-```
-You: Save this test as "production-health-check"
-You: Show me all saved tests, then run one
-You: Compare sip:trunk-us.example.com and sip:trunk-eu.example.com
-You: Test these servers: sip:a.example.com, sip:b.example.com, sip:c.example.com
-```
-
-**Troubleshooting:**
-
-```
-You: Try again with 15 second timeout
-```
-
-**Advanced combos:**
-
-```
-You: Generate speech "Hello, I need billing support", call with PCMA, then press 2 for billing
-You: Test sip:agent@broken-trunk.com, analyze the failure, fix it with TCP, save the config
-```
-
-### Run without the AI agent
-
-If you just want to run SIP tests programmatically without the conversational TUI:
-
-```bash
-docker compose exec pinmoli npx tsx -e "
-  import { runSipTest } from './src/sip/engine.js';
-  for await (const event of runSipTest({
-    uri: 'sip:trunk.example.com',
-    method: 'OPTIONS',
-    codecs: ['PCMU']
-  })) { console.log(JSON.stringify(event)); }
-"
-```
-
-## Configuration
-
-### LLM Provider
-
-Pinmoli auto-detects your LLM provider from environment variables. Set one and go:
-
-| Provider | `--provider` | Env var | Default model |
-|----------|-------------|---------|---------------|
-| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-5` |
-| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-4o` |
-| Google Gemini | `google` | `GEMINI_API_KEY` | `gemini-2.5-flash` |
-| Google Vertex AI | `google-vertex` | `--service-account <path>` | `gemini-2.5-flash` |
-| Groq | `groq` | `GROQ_API_KEY` | `llama-3.3-70b-versatile` |
-| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4.5` |
-
-```bash
-# Just set the env var — provider is auto-detected
-ANTHROPIC_API_KEY=sk-ant-... pinmoli
-
-# Or be explicit
-pinmoli --provider openai --model gpt-4o
-
-# Override the default model
-pinmoli --provider anthropic --model claude-haiku-4-5
-
-# Vertex AI (service account)
-pinmoli --service-account /path/to/key.json
-
-# Switch provider at runtime via slash command
-/model anthropic claude-sonnet-4-5
-/model google gemini-2.5-pro
-/model                              # show current provider/model
-```
-
-### CLI Reference
-
-```
-pinmoli [options]
-
-  --provider <name>          LLM provider (anthropic, openai, google, google-vertex, groq, openrouter)
-  --model <id>               Model ID (default depends on provider)
-  --service-account <path>   GCP service account JSON (implies google-vertex)
-  --help                     Show usage
-```
-
-### Environment Variables
-
-| Variable | Provider |
-|----------|----------|
-| `ANTHROPIC_API_KEY` | Anthropic |
-| `OPENAI_API_KEY` | OpenAI |
-| `GEMINI_API_KEY` | Google Gemini |
-| `GROQ_API_KEY` | Groq |
-| `OPENROUTER_API_KEY` | OpenRouter |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Google Vertex AI (with `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`) |
-
-### Docker Compose
-
-The default `docker-compose.yml` uses `network_mode: host` so SIP and RTP traffic reaches the network directly. Modify if your setup requires bridged networking with explicit port mapping.
-
-## Tools
-
-Pinmoli exposes 7 tools to the AI agent. You don't call these directly -- you describe what you want and the agent picks the right tool. See [SKILLS.md](./SKILLS.md) for full parameter reference.
-
-| Tool | Purpose |
-|------|---------|
-| `sip_test` | Run OPTIONS, INVITE, or REGISTER against a SIP endpoint. Supports DTMF send/receive via `dtmfDigits`. |
-| `webrtc_test` | Connect to a WHIP endpoint, negotiate ICE/DTLS/SRTP, send audio, capture agent response. Supports DTMF. |
-| `generate_audio` | Create custom audio samples (sine, DTMF dual-tone, silence, TTS speech) |
-| `analyze_failure` | Diagnose a failed test and suggest fixes |
-| `save_test` | Save a test configuration by name (SQLite, catches duplicate names) |
-| `load_test` | Load a saved test configuration by name |
-| `list_tests` | List all saved test configurations with timestamps |
-
-## Audio Samples
-
-### Pre-generated (included in the Docker image)
-
-| Sample | Description | Duration |
-|--------|-------------|----------|
-| `voice-hello` | "Hello, this is a test call from Pinmoli" | ~3s |
-| `sine-440hz` | 440 Hz sine wave | 3s |
-| `sine-1000hz` | 1000 Hz sine wave | 3s |
-| `dtmf-123` | DTMF tones 1-2-3 | 1.5s |
-| `silence` | Silence | 3s |
-
-All samples are PCMU @ 8kHz mono (G.711 u-law), the standard SIP codec.
-
-### Runtime generation
-
-Ask the agent to generate custom speech:
-
-```
-You: Generate speech saying "Please transfer me to billing"
-You: Now call sip:+15551234567@trunk.example.com with that audio
-```
-
-Or generate tones:
-
-```
-You: Generate a 1000Hz sine wave for 5 seconds, then test the endpoint
-```
-
-## Packet Capture
-
-Every Pinmoli session automatically captures all SIP signaling and RTP media traffic to a pcap file. Open it in Wireshark for protocol-level debugging.
-
-### How it works
-
-The `entrypoint.sh` runs `tcpdump` in the background for the entire session:
-- Captures port 5060 (SIP) and UDP ports 10000-65535 (RTP/SRTP)
-- Saves to `/app/captures/pinmoli-YYYYMMDD-HHMMSS.pcap` inside the container
-- Stops automatically when the session ends (EXIT trap)
-
-### Saving captures to your local machine
-
-**Docker Compose** (development): Captures appear at `./captures/` automatically — the source directory is bind-mounted.
-
-**Docker Run** (GHCR image): Mount a volume so captures persist after the container exits:
-
-```bash
-# Create the captures directory (first time only)
-mkdir -p captures
-
-# Mount it when running Pinmoli
-docker run --rm -it --network host \
-  -v $(pwd)/captures:/app/captures \
-  -e ANTHROPIC_API_KEY=sk-ant-... \
-  ghcr.io/arakoodev/pinmoli
-```
-
-After the session, your captures are in `./captures/`:
-
-```bash
-ls captures/
-# pinmoli-20260305-143022.pcap
-
-# Open in Wireshark
-wireshark captures/pinmoli-20260305-143022.pcap
-```
-
-Previous captures from earlier runs are preserved — new sessions create new pcap files with unique timestamps.
-
-### Session Directories
-
-Each test run creates its own directory under `captures/` grouping all artifacts:
-
-```bash
-ls captures/
-# sip-invite-trunk.example.com-20260319-181341/
-# sip-options-trunk.example.com-20260319-180000/
-# webrtc-whip-agent.example.com-20260319-182000/
-
-ls captures/sip-invite-trunk.example.com-20260319-181341/
-# sip-log.txt         # Every SIP message sent/received with ISO timestamps
-# metadata.json       # Config, duration, responses, codec, public IP, success/failure
-# agent-greeting.wav  # Agent's greeting audio (if sendDelay > 0)
-# sent-audio.wav      # Outbound audio (transcoded to negotiated codec)
-# agent-response.wav  # Agent's response audio
-```
-
-WebRTC sessions use `signaling-log.txt` (WHIP offer/answer) instead of `sip-log.txt`. Opus payloads are decoded via an OGG Opus container piped through ffmpeg. Audio files persist alongside pcap captures in the same volume mount.
+Type test requests in natural language. Slash commands:
+
+- `/model anthropic claude-sonnet-4-5` -- switch LLM provider/model at runtime
+- `/model` -- show current provider and model
+- `/service-account /path/to/key.json` -- configure Vertex AI credentials
+- Ctrl+C -- abort current operation / clear input / quit
 
 ### Pipe Mode
 
-For non-interactive use (scripting, CI, or piping from another process):
+For scripting, CI, or piping from another process:
 
 ```bash
 # Single message
@@ -527,11 +210,212 @@ analyze the failure
 EOF
 ```
 
-Agent responses go to **stdout**, tool output and status go to **stderr**. The TUI mode also tees all output to stderr, so both modes produce capturable logs.
+Agent responses go to **stdout**, tool output and status go to **stderr**.
 
-### Disable capture
+### Replay Mode
 
-If you don't need packet capture (e.g., CI/CD), set `PINMOLI_NO_CAPTURE=1`:
+Re-execute a recorded session without the LLM. Compares the replay flow against the original:
+
+```bash
+docker compose exec pinmoli npx tsx src/cli-replay.ts captures/<session-id>
+```
+
+The session directory must contain a `manifest.json` (auto-created by Pinmoli). Each tool call is replayed with the same parameters. Original and replay `flow.json` files are compared side-by-side, showing sequence matches, timing deltas, and codec/RTP differences.
+
+```bash
+# Example
+docker compose exec pinmoli npx tsx src/cli-replay.ts captures/20260320-065054-tw1x
+```
+
+### Run Without the AI Agent
+
+Use the SIP engine directly as a library:
+
+```bash
+docker compose exec pinmoli npx tsx -e "
+  import { runSipTest } from './src/sip/engine.js';
+  for await (const event of runSipTest({
+    uri: 'sip:trunk.example.com',
+    method: 'OPTIONS',
+    codecs: ['PCMU']
+  })) { console.log(JSON.stringify(event)); }
+"
+```
+
+## Examples
+
+Every example below has a corresponding integration test in `test/integration/readme-prompts.test.ts`.
+
+**SIP basics:**
+
+```
+Send OPTIONS to sip:trunk.example.com
+INVITE sip:+15551234567@sip.livekit.cloud with opus and PCMU
+Register at sip:pbx.example.com with username admin password secret
+```
+
+**Codec negotiation:**
+
+```
+Test with PCMA codec -- I want to verify A-law support
+Call the agent using G722 and wait 20 seconds for a response
+Test sip:pbx.example.com offering only PCMA and PCMU, see which it picks
+```
+
+**DTMF and IVR navigation:**
+
+```
+Call sip:+15551234567@trunk.example.com and press 1-2-3-# after the greeting
+Call sip:+18005551234@trunk.example.com, press 1 for sales, then 0 for operator
+Connect via WebRTC to https://agent.example.com/whip and enter PIN 1234#
+```
+
+**Speech generation:**
+
+```
+Generate speech saying "What is the weather today?" then call the agent
+Generate a 1000Hz sine wave for 5 seconds, then test the endpoint
+Make the greeting say "Por favor espere" in Spanish, then test
+Generate speech with gemini saying "Hello, I need help with my account"
+```
+
+**Bidirectional conversations:**
+
+```
+Call sip:agent@example.com, listen for 5 seconds first, then send my greeting
+INVITE sip:agent@livekit.cloud, send the greeting, wait 30 seconds for a response
+```
+
+**WebRTC:**
+
+```
+Test the WHIP endpoint at https://my-agent.example.com/whip with bearer token abc123
+```
+
+**Save, load, and batch:**
+
+```
+Save this test as "production-health-check"
+Show me all saved tests, then run one
+Compare sip:trunk-us.example.com and sip:trunk-eu.example.com
+Test these servers: sip:a.example.com, sip:b.example.com, sip:c.example.com
+```
+
+**Failure analysis:**
+
+```
+Why did it fail?
+What went wrong? (after a 488 codec mismatch)
+```
+
+**Advanced combos:**
+
+```
+Generate speech "Hello, I need billing support", call with PCMA, then press 2 for billing
+Test sip:agent@broken-trunk.com, analyze the failure, fix it with TCP, save the config
+```
+
+## Configuration
+
+### LLM Provider
+
+| Provider | `--provider` | Env var | Default model |
+|----------|-------------|---------|---------------|
+| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-5` |
+| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-4o` |
+| Google Gemini | `google` | `GEMINI_API_KEY` | `gemini-2.5-flash` |
+| Google Vertex AI | `google-vertex` | `--service-account <path>` | `gemini-2.5-pro` |
+| Groq | `groq` | `GROQ_API_KEY` | `llama-3.3-70b-versatile` |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4.5` |
+
+The provider is auto-detected from whichever env var you set. Use `--provider` to override:
+
+```bash
+pinmoli --provider openai --model gpt-4o
+pinmoli --provider anthropic --model claude-haiku-4-5
+```
+
+### CLI Flags
+
+```
+pinmoli [options]
+
+  --provider <name>          LLM provider (anthropic, openai, google, google-vertex, groq, openrouter)
+  --model <id>               Model ID (default depends on provider)
+  --tts-model <id>           Gemini TTS model (default: gemini-2.5-flash-tts, Vertex AI only)
+  --service-account <path>   GCP service account JSON (implies google-vertex)
+  --help                     Show usage
+```
+
+### Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `ANTHROPIC_API_KEY` | Anthropic provider |
+| `OPENAI_API_KEY` | OpenAI provider |
+| `GEMINI_API_KEY` | Google Gemini provider |
+| `GROQ_API_KEY` | Groq provider |
+| `OPENROUTER_API_KEY` | OpenRouter provider |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Path to GCP service account JSON (Vertex AI) |
+| `GOOGLE_CLOUD_PROJECT` | GCP project ID (default: `lifeandhalf-24122025`) |
+| `GOOGLE_CLOUD_LOCATION` | Vertex AI region (default: `us-central1`) |
+| `LIVEKIT_ENDPOINT` | LiveKit SIP endpoint for live tests |
+| `PINMOLI_NO_CAPTURE` | Set to `1` to disable packet capture |
+
+### Docker Compose
+
+The default `docker-compose.yml` uses `network_mode: host` so SIP and RTP traffic reaches the network directly. The `.env` file at the repo root is loaded automatically. Source directory is bind-mounted, so code changes are reflected immediately.
+
+## Session Output
+
+Each Pinmoli session creates a directory under `captures/` grouping all artifacts:
+
+```
+captures/{session-id}/
+├── manifest.json                    # Tool calls with params, timing, success/failure
+├── audio-samples/                   # Generated TTS audio (espeak, Gemini)
+├── sip-invite-host-20260320-181341/
+│   ├── sip-log.txt                  # Every SIP message sent/received with ISO timestamps
+│   ├── metadata.json                # Config, duration, responses, codec, public IP
+│   ├── flow.json                    # Structured signaling flow (for replay comparison)
+│   ├── agent-greeting.wav           # Agent's greeting (if sendDelay > 0)
+│   ├── sent-audio.wav               # Outbound audio (transcoded to negotiated codec)
+│   └── agent-response.wav           # Agent's response audio
+├── sip-options-host-20260320-180000/
+│   ├── sip-log.txt
+│   ├── metadata.json
+│   └── flow.json
+└── webrtc-whip-host-20260320-182000/
+    ├── signaling-log.txt            # WHIP offer/answer exchange
+    ├── metadata.json
+    ├── flow.json
+    └── *.wav                        # Audio files (opus decoded via OGG + ffmpeg)
+```
+
+The `manifest.json` records every tool call the LLM made during the session, enabling [replay mode](#replay-mode) to re-execute without the LLM.
+
+### Packet Capture
+
+Background `tcpdump` captures SIP (port 5060) + RTP (UDP 10000-65535) for every session. Saves to `captures/pinmoli-YYYYMMDD-HHMMSS.pcap`.
+
+**Docker Compose:** Captures appear at `./captures/` automatically (bind mount).
+
+**Docker Run:** Mount a volume:
+
+```bash
+docker run --rm -it --network host \
+  -v $(pwd)/captures:/app/captures \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  ghcr.io/arakoodev/pinmoli
+```
+
+Open in Wireshark:
+
+```bash
+wireshark captures/pinmoli-20260305-143022.pcap
+```
+
+### Disable Capture
 
 ```bash
 docker run --rm -it --network host \
@@ -540,81 +424,44 @@ docker run --rm -it --network host \
   ghcr.io/arakoodev/pinmoli
 ```
 
-## Project Structure
+## Audio Samples
+
+### Pre-generated (included in the Docker image)
+
+| Sample | Description | Duration |
+|--------|-------------|----------|
+| `voice-hello` | "Hello, this is a test call from Pinmoli" | ~3s |
+| `sine-440hz` | 440 Hz sine wave | 3s |
+| `sine-1000hz` | 1000 Hz sine wave | 3s |
+| `dtmf-123` | DTMF tones 1-2-3 | 1.5s |
+| `silence` | Silence | 3s |
+
+All samples are PCMU @ 8kHz mono (G.711 u-law).
+
+### Runtime TTS
+
+By default, `generate_audio` uses espeak (offline, fast). With Vertex AI configured, use Gemini TTS for higher quality:
 
 ```
-pinmoli/
-├── src/
-│   ├── cli.ts                  # Entry point, interactive TUI REPL
-│   ├── cli-pipe.ts             # Pipe mode entry point (stdin→agent→stdout)
-│   ├── agent/runtime.ts        # PinmoliAgent wraps pi-agent-core
-│   ├── ui/
-│   │   ├── tui.ts              # PinmoliTUI wraps pi-tui
-│   │   ├── tool-output.ts      # Collapsible tool result rendering
-│   │   └── test-terminal.ts    # Test-mode Terminal implementation
-│   ├── tools/
-│   │   ├── registry.ts         # 7-tool allowlist enforcement
-│   │   ├── index.ts            # Tool registration
-│   │   ├── sip-test.ts         # SIP test execution (async generator)
-│   │   ├── webrtc-test.ts      # WebRTC test execution (WHIP + werift)
-│   │   ├── generate-audio.ts   # Audio generation (ffmpeg, espeak)
-│   │   ├── analyze-failure.ts  # Diagnostic pattern matching
-│   │   └── save/load/list-tests.ts
-│   ├── sip/
-│   │   ├── engine.ts           # SIP test orchestration (async generator)
-│   │   ├── protocol.ts         # SIP message building
-│   │   ├── sdp.ts              # SDP offer/answer builder
-│   │   ├── rtp-receiver.ts     # RTP/DTMF packet send/receive
-│   │   ├── codec.ts            # Codec table, transcoding (PCMU↔PCMA), lookup
-│   │   ├── dtmf.ts             # RFC 4733 encode/decode, DtmfDetector
-│   │   └── audio.ts            # Audio sample resolution
-│   ├── webrtc/
-│   │   ├── engine.ts           # WebRTC test orchestration (async generator)
-│   │   ├── whip.ts             # WHIP signaling client (RFC 9725)
-│   │   └── audio-frames.ts     # PCM16 frames, OGG Opus decode, WAV save
-│   ├── network/
-│   │   ├── utils.ts            # STUN NAT discovery, getLocalIp(), getPublicIp()
-│   │   └── session.ts          # Per-session directory, signaling log, metadata
-│   ├── storage/db.ts           # SQLite + FTS5 persistence
-│   ├── validation/schemas.ts   # TypeBox schemas
-│   └── commands/service-account.ts
-├── audio-samples/              # Pre-generated PCMU WAV files
-├── test/
-│   ├── unit/                   # Protocol, SDP, RTP, DTMF, storage, tools, lint, WebRTC
-│   ├── integration/            # TUI flows, e2e, bidirectional RTP, speech
-│   └── live/                   # Tests against real SIP and WebRTC endpoints
-├── eslint-plugin-pinmoli.cjs   # 15 lint rules from real bugs
-├── Dockerfile                  # Alpine + Node 20 + ffmpeg + espeak + tcpdump + tini
-├── docker-compose.yml
-└── entrypoint.sh
+Generate speech saying "Please transfer me to billing"
+Generate speech with gemini saying "Hello, I need help with my account"
 ```
 
-## Testing
+> Gemini TTS requires Vertex AI (service account). The `GEMINI_API_KEY` path does not support TTS.
 
-All tests run inside Docker.
+## Tools
 
-```bash
-# Start the container
-docker compose up -d
+Pinmoli exposes 7 tools to the AI agent. You describe what you want and the agent picks the right tool. See [SKILLS.md](./SKILLS.md) for full parameter reference.
 
-# Run all tests
-docker compose exec pinmoli npx vitest run
-
-# Unit tests only (~1s)
-docker compose exec pinmoli npx vitest run test/unit/
-
-# Integration tests
-docker compose exec pinmoli npx vitest run test/integration/
-
-# Live tests (hits real SIP endpoints, requires network)
-docker compose exec pinmoli npx vitest run test/live/
-
-# Type-check
-docker compose exec pinmoli npx tsc --noEmit
-
-# Lint
-docker compose exec pinmoli npm run lint
-```
+| Tool | Purpose |
+|------|---------|
+| `sip_test` | Run OPTIONS, INVITE, or REGISTER against a SIP endpoint. Supports DTMF. |
+| `webrtc_test` | Connect to a WHIP endpoint, negotiate ICE/DTLS/SRTP, send/receive audio. Supports DTMF. |
+| `generate_audio` | Create audio samples (sine, DTMF, silence, TTS via espeak or Gemini). |
+| `analyze_failure` | Diagnose a failed test and suggest fixes. |
+| `save_test` | Save a test configuration by name (SQLite). |
+| `load_test` | Load a saved test configuration by name. |
+| `list_tests` | List all saved test configurations. |
 
 ## Troubleshooting
 
@@ -628,49 +475,40 @@ docker compose exec pinmoli sh -c 'kill $(lsof -ti:5060)'
 
 ### No RTP packets received
 
-1. **NAT/firewall** -- the host must be reachable on the RTP port advertised in SDP. Private IPs (WSL2 `172.x`, Docker `172.x`) are not routable from the internet.
-2. **No agent running** -- the remote SIP endpoint accepted the call but has no worker to generate audio.
-3. Run from a host with a public IP or use Docker with `network_mode: host`.
+1. **NAT/firewall** -- private IPs (WSL2 `172.x`, Docker `172.x`) are not routable. Run from a host with a public IP or use `network_mode: host`.
+2. **No agent running** -- the remote endpoint accepted the call but has no worker to generate audio.
 
 ### 503 Service Unavailable after 60s
 
-This is usually a synthetic 503 generated by the `sip` npm library when the remote drops the TCP connection (e.g., LiveKit agent timeout). It's not a real SIP 503. Common causes:
-- AI agent worker not running on the remote side
-- Malformed SDP or unroutable IPs in headers
-- Missing ACK after 200 OK
+Usually a synthetic 503 from the `sip` npm library when TCP drops. Common causes: agent worker not running, malformed SDP, unroutable IPs, missing ACK.
 
 ### LLM not responding
 
-Check that your credentials are configured:
+Check credentials are accessible inside the container:
 
 ```bash
-# If using a volume-mounted service account, verify it's accessible inside the container
-docker compose exec pinmoli ls -la /app/secrets/my-key.json
+# Vertex AI
+docker compose exec pinmoli ls -la /app/secrets/gcp-service-account.json
 
-# Or pass credentials via environment variable
-docker run --rm -it --network host \
-  -e ANTHROPIC_API_KEY=sk-ant-... \
-  ghcr.io/arakoodev/pinmoli
+# API key providers — verify .env is loaded
+docker compose exec pinmoli env | grep API_KEY
 ```
 
 ## Contributing
 
 ```bash
-# Fork and clone
 git clone https://github.com/your-fork/pinmoli.git
 cd pinmoli
-
-# Build the container
 docker compose build
+docker compose up -d
 
 # Run tests (must pass before submitting a PR)
-docker compose up -d
 docker compose exec pinmoli npx vitest run
 docker compose exec pinmoli npx tsc --noEmit
 docker compose exec pinmoli npm run lint
 ```
 
-All commands run inside Docker -- the container includes ffmpeg, espeak, and other dependencies that aren't available locally.
+All commands run inside Docker. See [ARCHITECTURE.md](./ARCHITECTURE.md) for codebase internals, engine design, and project structure.
 
 ## License
 

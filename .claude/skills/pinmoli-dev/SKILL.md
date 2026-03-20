@@ -64,6 +64,7 @@ Storage (src/storage/db.ts) -- SQLite + FTS5
 src/
 ├── cli.ts                    # Entry point, interactive TUI REPL
 ├── cli-pipe.ts               # Pipe mode (stdin→agent→stdout, stderr tee)
+├── cli-replay.ts             # Replay mode (re-execute sessions without LLM)
 ├── agent/runtime.ts          # PinmoliAgent wraps pi-agent-core
 ├── ui/
 │   ├── tui.ts                # PinmoliTUI wraps pi-tui Terminal
@@ -89,9 +90,14 @@ src/
 │   ├── engine.ts             # WebRTC test orchestration (async generator)
 │   ├── whip.ts               # WHIP signaling client (RFC 9725)
 │   └── audio-frames.ts       # PCM16 frame chunking, OGG Opus decode, WAV save
+├── google/
+│   ├── auth.ts               # Google Cloud OAuth2 via service account JWT
+│   ├── gemini-rest.ts        # Vertex AI generateContent REST client
+│   └── tts.ts                # Gemini TTS (text→MULAW audio, zero transcoding for SIP)
 ├── network/
 │   ├── utils.ts              # STUN NAT discovery, getLocalIp(), getPublicIp()
-│   └── session.ts            # Per-session directory, signaling log, metadata
+│   ├── session.ts            # Per-session directory, signaling log, metadata, manifest
+│   └── flow.ts               # Flow recording from engine events, FlowRecord, compareFlows()
 ├── storage/db.ts             # SQLite + FTS5 persistence
 ├── validation/schemas.ts     # TypeBox schemas
 └── commands/service-account.ts
@@ -164,8 +170,18 @@ await Promise.all([
 ]);
 ```
 
-### 7. Audio Capture to `captures/audio/`
-Received audio is saved to `captures/audio/` as WAV files. For WebRTC with opus codec, the OGG Opus decode pipeline in `audio-frames.ts` converts received opus payloads to PCM16 before saving.
+### 7. Audio Capture to Session Directories
+Received audio is saved to the per-test session directory as WAV files. For WebRTC with opus codec, the OGG Opus decode pipeline in `audio-frames.ts` converts received opus payloads to PCM16 before saving.
+
+### 9. Flow Recording
+Engine events are collected during tool execution and converted to a structured `FlowRecord` via `buildFlowFromEvents()`. The flow is written as `flow.json` alongside other session artifacts.
+```typescript
+import { buildFlowFromEvents, writeFlowJson } from '../network/flow.js';
+
+// After engine async generator completes:
+const flow = buildFlowFromEvents(collectedEvents, { protocol: 'sip', method: 'INVITE', uri });
+writeFlowJson(session, flow);
+```
 
 ### 8. Socket Cleanup Guards
 ```typescript
@@ -234,6 +250,9 @@ docker compose exec pinmoli npx vitest run test/integration/  # integration
 docker compose exec pinmoli npx vitest run test/live/    # live (real endpoints)
 docker compose exec pinmoli npx tsc --noEmit             # type-check
 docker compose exec pinmoli npm run lint                  # lint
+
+# Replay a recorded session
+docker compose exec pinmoli npx tsx src/cli-replay.ts captures/<session-id>
 ```
 
 ## Adding a New Codec
@@ -269,4 +288,4 @@ Every session auto-captures SIP + RTP traffic via `tcpdump` in `entrypoint.sh`.
 **Dev:**
 - `vitest`: Testing
 - `typescript`: Type checking
-- `eslint`: Linting with 14 custom rules
+- `eslint`: Linting with 15 custom rules
