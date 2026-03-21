@@ -5,13 +5,17 @@ import type { AgentTool } from '@mariozechner/pi-agent-core';
 
 describe('Tool Registry', () => {
   describe('isToolAllowed', () => {
-    it('allows SIP and WebRTC tools', () => {
+    it('allows SIP, WebRTC, and interactive call tools', () => {
       expect(isToolAllowed('sip_test')).toBe(true);
       expect(isToolAllowed('webrtc_test')).toBe(true);
       expect(isToolAllowed('analyze_failure')).toBe(true);
       expect(isToolAllowed('save_test')).toBe(true);
       expect(isToolAllowed('load_test')).toBe(true);
       expect(isToolAllowed('list_tests')).toBe(true);
+      expect(isToolAllowed('start_call')).toBe(true);
+      expect(isToolAllowed('send_audio')).toBe(true);
+      expect(isToolAllowed('receive_audio')).toBe(true);
+      expect(isToolAllowed('end_call')).toBe(true);
     });
 
     it('blocks non-SIP tools', () => {
@@ -66,8 +70,8 @@ describe('Tool Registry', () => {
   });
 
   describe('ALLOWED_TOOLS', () => {
-    it('contains exactly 8 tools', () => {
-      expect(ALLOWED_TOOLS).toHaveLength(8);
+    it('contains exactly 12 tools', () => {
+      expect(ALLOWED_TOOLS).toHaveLength(12);
       expect(ALLOWED_TOOLS).toEqual([
         'sip_test',
         'webrtc_test',
@@ -76,7 +80,11 @@ describe('Tool Registry', () => {
         'load_test',
         'list_tests',
         'generate_audio',
-        'replay_session'
+        'replay_session',
+        'start_call',
+        'send_audio',
+        'receive_audio',
+        'end_call',
       ]);
     });
   });

@@ -26,13 +26,13 @@ describe('Skill-Code Sync', () => {
   // ----- Tool registry -----
 
   describe('Tool registry matches skill documentation', () => {
-    it('ALLOWED_TOOLS has exactly 8 entries', () => {
-      expect(ALLOWED_TOOLS).toHaveLength(8);
+    it('ALLOWED_TOOLS has exactly 12 entries', () => {
+      expect(ALLOWED_TOOLS).toHaveLength(12);
     });
 
-    it('dev skill claims 8 tools', () => {
-      // Matches "8 tools", "8-tool", "Exactly 8 tools", etc.
-      expect(devSkill).toMatch(/\b8[\s-]+tool/i);
+    it('dev skill claims 12 tools', () => {
+      // Matches "12 tools", "12-tool", "Exactly 12 tools", etc.
+      expect(devSkill).toMatch(/\b12[\s-]+tool/i);
     });
 
     it('all registered tool names appear in dev skill', () => {

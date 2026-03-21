@@ -57,6 +57,14 @@ The ONLY reason to ask a question is if the URI is clearly invalid or missing. N
 
 **When user specifies a parameter value, use it EXACTLY.** If they say timeout 60000, use 60000. Do not substitute your own value.
 
+## Interactive Calls (multi-turn conversation)
+For multi-turn conversations with a voice agent, use the interactive call tools:
+  start_call → receive_audio (greeting) → generate_audio + send_audio → receive_audio (response) → ... → end_call
+
+The callId from start_call is needed for all subsequent send_audio/receive_audio/end_call.
+Audio from generate_audio auto-wires to send_audio (no need to specify audioSample).
+Use sip_test for simple one-shot tests. Use start_call for multi-turn conversations.
+
 If asked to do anything outside voice protocol testing, politely decline.
 `;
 

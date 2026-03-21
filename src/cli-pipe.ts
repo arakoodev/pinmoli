@@ -17,6 +17,7 @@ import { createInterface } from 'readline';
 import { PinmoliAgent } from './agent/runtime.js';
 import { isVertexConfigured } from './commands/service-account.js';
 import { initCliSession, initManifest } from './network/session.js';
+import { terminateAll } from './sip/call-store.js';
 import { getEnvApiKey } from '@mariozechner/pi-ai';
 import type { KnownProvider } from '@mariozechner/pi-ai';
 import type { Config } from './validation/schemas.js';
@@ -93,6 +94,12 @@ async function main() {
   initManifest(provider, model);
   process.stderr.write(`Pinmoli pipe mode — ${PROVIDER_DEFAULTS[provider]?.display ?? provider} / ${model}\n`);
   process.stderr.write(`Session: ${sessionRoot}\n`);
+
+  // Clean up active interactive calls on exit
+  const cleanup = async () => { try { await terminateAll(); } catch { /* best-effort */ } };
+  process.on('beforeExit', cleanup);
+  process.on('SIGINT', async () => { await cleanup(); process.exit(0); });
+  process.on('SIGTERM', async () => { await cleanup(); process.exit(0); });
 
   const agent = new PinmoliAgent(config, pipeTui);
 

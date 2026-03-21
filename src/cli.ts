@@ -9,6 +9,7 @@ import { PinmoliTUI } from './ui/tui.js';
 import { PinmoliAgent } from './agent/runtime.js';
 import { configureServiceAccount, isVertexConfigured } from './commands/service-account.js';
 import { initCliSession, initManifest } from './network/session.js';
+import { terminateAll } from './sip/call-store.js';
 import { getEnvApiKey } from '@mariozechner/pi-ai';
 import type { KnownProvider } from '@mariozechner/pi-ai';
 import type { Config } from './validation/schemas.js';
@@ -273,6 +274,12 @@ async function main() {
   console.log(`Model: ${model}`);
   console.log(`Session: ${sessionRoot}`);
   console.log('Initializing agent...');
+
+  // Clean up active interactive calls on exit
+  const cleanup = async () => { try { await terminateAll(); } catch { /* best-effort */ } };
+  process.on('beforeExit', cleanup);
+  process.on('SIGINT', async () => { await cleanup(); process.exit(0); });
+  process.on('SIGTERM', async () => { await cleanup(); process.exit(0); });
 
   let tui: PinmoliTUI | undefined;
   try {

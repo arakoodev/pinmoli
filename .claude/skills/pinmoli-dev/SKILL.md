@@ -14,7 +14,7 @@ This skill provides context for AI assistants working on the Pinmoli codebase.
 A specialized, domain-restricted AI agent for SIP/WebRTC testing. Think "Postman with Agent Mode" but exclusively for voice protocols. Multi-provider LLM support (Anthropic, OpenAI, Gemini, Groq, OpenRouter).
 
 **Key Constraints:**
-- Exactly 8 tools (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests, replay_session)
+- Exactly 12 tools (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests, replay_session, start_call, send_audio, receive_audio, end_call)
 - Domain-restricted to SIP/WebRTC testing only
 - No file editing, no bash commands -- voice protocol testing only
 - Built on pi-mono libraries (pi-agent-core, pi-ai, pi-tui)
@@ -34,9 +34,13 @@ Agent Runtime (src/agent/runtime.ts)
   - System prompt (domain restricted)
   |
   v
-8 Tools (src/tools/)
-  - sip_test      -- SIP INVITE/OPTIONS/REGISTER
+12 Tools (src/tools/)
+  - sip_test      -- SIP INVITE/OPTIONS/REGISTER (one-shot)
   - webrtc_test   -- WebRTC via WHIP (RFC 9725)
+  - start_call    -- Interactive SIP call (INVITE → 200 OK → ACK)
+  - send_audio    -- Send audio on active call
+  - receive_audio -- Listen for audio on active call
+  - end_call      -- Hang up active call (BYE)
   - generate_audio -- ffmpeg/espeak audio generation
   - analyze_failure -- Pattern-matched diagnostics
   - replay_session -- Re-execute a recorded session's tool calls
@@ -72,16 +76,22 @@ src/
 │   ├── tool-output.ts        # Collapsible tool result rendering
 │   └── test-terminal.ts      # Test-mode Terminal implementation
 ├── tools/
-│   ├── registry.ts           # 8-tool allowlist enforcement
+│   ├── registry.ts           # 12-tool allowlist enforcement
 │   ├── index.ts              # Tool registration (TypeBox schemas)
-│   ├── sip-test.ts           # SIP test execution
+│   ├── sip-test.ts           # SIP test execution (one-shot)
 │   ├── webrtc-test.ts        # WebRTC test execution
+│   ├── start-call.ts         # Interactive call: INVITE → 200 OK → ACK
+│   ├── send-audio.ts         # Interactive call: send audio/DTMF
+│   ├── receive-audio.ts      # Interactive call: listen for audio
+│   ├── end-call.ts           # Interactive call: BYE + cleanup
 │   ├── generate-audio.ts     # Audio generation (ffmpeg, espeak)
 │   ├── analyze-failure.ts    # Diagnostic pattern matching
 │   └── save/load/list-tests.ts
 ├── sip/
-│   ├── engine.ts             # SIP test orchestration (async generator)
-│   ├── protocol.ts           # SIP message building
+│   ├── engine.ts             # SIP test orchestration (async generator, delegates INVITE to call-session)
+│   ├── call-session.ts       # Composable call phases: openDialog, sendAudio, receiveAudio, closeDialog
+│   ├── call-store.ts         # In-memory CallHandle store (Map<callId, CallHandle>)
+│   ├── protocol.ts           # SIP message building (OPTIONS, INVITE, ACK, BYE, CANCEL, REGISTER)
 │   ├── sdp.ts                # SDP offer/answer builder + parseSdpAnswer()
 │   ├── rtp-receiver.ts       # RTP/DTMF send/receive/save
 │   ├── codec.ts              # CODEC_TABLE, transcoding (PCMU<->PCMA), lookup
@@ -289,4 +299,4 @@ Every session auto-captures SIP + RTP traffic via `tcpdump` in `entrypoint.sh`.
 **Dev:**
 - `vitest`: Testing
 - `typescript`: Type checking
-- `eslint`: Linting with 15 custom rules
+- `eslint`: Linting with 17 custom rules

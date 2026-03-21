@@ -129,6 +129,49 @@ export const TestConfigSchema = Type.Object({
 
 export type TestConfig = Static<typeof TestConfigSchema>;
 
+// Interactive call tool schemas (subset of TestConfig)
+export const StartCallConfigSchema = Type.Object({
+  uri: SipUriSchema,
+  codecs: Type.Optional(Type.Array(CodecSchema, {
+    minItems: 1,
+    description: 'Codecs to offer in SDP. Default: ["PCMU"].',
+  })),
+  timeout: Type.Optional(Type.Number({
+    minimum: 1000,
+    default: 30000,
+    description: 'SIP INVITE timeout in ms. Default: 30000.',
+  })),
+});
+
+export type StartCallConfig = Static<typeof StartCallConfigSchema>;
+
+export const SendAudioConfigSchema = Type.Object({
+  callId: Type.String({ description: 'Call ID returned by start_call.' }),
+  audioSample: Type.Optional(AudioSampleSchema),
+  dtmfDigits: Type.Optional(Type.String({
+    pattern: '^[0-9*#A-Da-d]+$',
+    description: 'DTMF digits to send (RFC 4733 telephone-event). e.g. "1234#"',
+  })),
+});
+
+export type SendAudioConfig = Static<typeof SendAudioConfigSchema>;
+
+export const ReceiveAudioConfigSchema = Type.Object({
+  callId: Type.String({ description: 'Call ID returned by start_call.' }),
+  duration: Type.Optional(Type.Number({
+    minimum: 1,
+    maximum: 60,
+    default: 10,
+    description: 'Seconds to listen for audio. Default: 10.',
+  })),
+});
+
+export type ReceiveAudioConfig = Static<typeof ReceiveAudioConfigSchema>;
+
+export const EndCallConfigSchema = Type.Object({
+  callId: Type.String({ description: 'Call ID returned by start_call.' }),
+});
+
 // ICE server configuration
 export const IceServerSchema = Type.Object({
   urls: Type.String({
