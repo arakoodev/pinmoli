@@ -43,7 +43,13 @@ const GenerateAudioParamsSchema = Type.Object({
     Type.Literal('espeak'),
     Type.Literal('gemini'),
   ], {
-    description: 'TTS engine for speech generation: espeak (fast, offline) or gemini (high quality, Vertex AI). Default: espeak.'
+    description: 'TTS engine for speech generation: espeak (fast, offline, robotic — good for stress-testing agent comprehension) or gemini (high quality, natural, Vertex AI). Default: espeak.'
+  })),
+  language: Type.Optional(Type.String({
+    description: 'Language code for espeak TTS (e.g. "ja" for Japanese, "en" for English, "es" for Spanish, "fr" for French, "de" for German, "zh" for Chinese). Gemini auto-detects language from the text. Default: "en".'
+  })),
+  voice: Type.Optional(Type.String({
+    description: 'Voice name for Gemini TTS: Zephyr, Puck, Charon, Kore, Fenrir, Aoede, Leda, Orus, Pegasus. Default: Kore.'
   }))
 });
 
@@ -59,7 +65,7 @@ export const generateAudioTool: AgentTool = {
   parameters: GenerateAudioParamsSchema,
 
   async execute(toolCallId, params, signal, onUpdate) {
-    const { type, filename, frequency = 440, duration = 3, text, digits, codec: codecName, ttsProvider } = params as GenerateAudioParams;
+    const { type, filename, frequency = 440, duration = 3, text, digits, codec: codecName, ttsProvider, language, voice } = params as GenerateAudioParams;
     const codec: CodecInfo = codecName ? (codecByName(codecName) ?? CODEC_TABLE.PCMU) : CODEC_TABLE.PCMU;
 
     // Save audio-samples under the CLI session directory
@@ -89,7 +95,7 @@ export const generateAudioTool: AgentTool = {
           success = await generateSilence(outputPath, duration, codec);
           break;
         case 'speech':
-          success = await generateSpeech(outputPath, text || 'Hello', codec, ttsProvider);
+          success = await generateSpeech(outputPath, text || 'Hello', codec, ttsProvider, language, voice);
           break;
       }
 
@@ -213,14 +219,14 @@ async function generateSilence(output: string, duration: number, codec: CodecInf
   });
 }
 
-async function generateSpeech(output: string, text: string, codec: CodecInfo, ttsProvider?: string): Promise<boolean> {
+async function generateSpeech(output: string, text: string, codec: CodecInfo, ttsProvider?: string, language?: string, voice?: string): Promise<boolean> {
   // Gemini TTS path — high quality, Vertex AI only
   if (ttsProvider === 'gemini') {
     if (!isVertexConfigured()) {
       throw new Error('Gemini TTS requires Vertex AI. Configure with --service-account or GOOGLE_APPLICATION_CREDENTIALS.');
     }
     const { synthesizeSpeech, wrapMulawWav } = await import('../google/tts.js');
-    const samples = await synthesizeSpeech(text);
+    const samples = await synthesizeSpeech(text, voice ? { voice } : undefined);
 
     if (codec.name === 'PCMU') {
       // Native MULAW — zero transcoding, direct WAV save
@@ -248,11 +254,15 @@ async function generateSpeech(output: string, text: string, codec: CodecInfo, tt
     }
   }
 
-  // espeak path (default) — fast, offline
+  // espeak path (default) — fast, offline, robotic
   return new Promise((resolve) => {
     // Use unique temp path to avoid collisions between concurrent generations
     const tmpFile = `/tmp/speech-${Date.now()}-${process.pid}.wav`;
-    const espeak = spawn('espeak', [text, '-w', tmpFile]);
+    const espeakArgs = [text, '-w', tmpFile];
+    if (language) {
+      espeakArgs.push('-v', language);
+    }
+    const espeak = spawn('espeak', espeakArgs);
 
     espeak.on('close', (code) => {
       if (code === 0) {
