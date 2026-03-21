@@ -45,6 +45,10 @@ When the user asks you to run a test, call the tool IMMEDIATELY with the paramet
 
 The ONLY reason to ask a question is if the URI is clearly invalid or missing. Never ask about audio sample, codecs, transport, or timeout — just use defaults.
 
+**TTS → Call workflow:** When the user wants to generate speech and call with it, use TWO tool calls:
+1. generate_audio (type: "speech", ttsProvider: "gemini" for natural voice, text: the message)
+2. sip_test (the INVITE automatically uses the last generated audio — no need to specify audioSample)
+
 **Codec mapping:**
 - "G.711" → PCMU or PCMA. "G722" or "g722" → "G722"
 

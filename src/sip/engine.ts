@@ -6,7 +6,7 @@
 import dgram from 'dgram';
 import { generateCallId, generateTag } from './protocol.js';
 import { buildSdp, parseSdpAnswer } from './sdp.js';
-import { getAudioSamplePath } from './audio.js';
+import { getAudioSamplePath, getLatestSessionSample } from './audio.js';
 import { receiveRTPAudio, saveAsWAV, sendRTPFromSocket, sendDtmfFromSocket, loadAudioSample, type RtpStreamState } from './rtp-receiver.js';
 import { transcodePcmuTo, CODEC_TABLE, type CodecInfo } from './codec.js';
 import { DtmfDetector } from './dtmf.js';
@@ -294,8 +294,8 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           sipSocket.send(ackMessage, port, host, () => resolve());
         });
 
-        // Resolve audio sample
-        const sample = config.audioSample || 'voice-hello';
+        // Resolve audio sample: explicit → latest session-generated → built-in voice-hello
+        const sample = config.audioSample || getLatestSessionSample() || 'voice-hello';
         const samplePath = getAudioSamplePath(sample);
         const pcmuData = samplePath ? loadAudioSample(samplePath) : null;
 

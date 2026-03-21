@@ -1,4 +1,4 @@
-import { existsSync } from 'fs';
+import { existsSync, readdirSync, statSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getSessionRoot } from '../network/session.js';
@@ -41,4 +41,23 @@ export function getAudioSamplePath(sample: string): string | null {
   if (existsSync(sample)) return sample;
 
   return null;
+}
+
+/**
+ * Find the most recently generated audio sample in the current session.
+ * Returns the sample name (without .wav) or null if none exist.
+ *
+ * Used when INVITE is called without audioSample — auto-picks the last
+ * generated TTS/audio so the user doesn't have to wire filenames manually.
+ */
+export function getLatestSessionSample(): string | null {
+  const samplesDir = resolve(getSessionRoot(), 'audio-samples');
+  if (!existsSync(samplesDir)) return null;
+
+  const files = readdirSync(samplesDir)
+    .filter(f => f.endsWith('.wav'))
+    .map(f => ({ name: f.replace(/\.wav$/, ''), mtime: statSync(resolve(samplesDir, f)).mtimeMs }))
+    .sort((a, b) => b.mtime - a.mtime);
+
+  return files.length > 0 ? files[0].name : null;
 }
