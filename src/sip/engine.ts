@@ -85,16 +85,17 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
       });
     });
 
-    // STUN-discover the RTP socket's NAT-mapped address.
-    // This is the address remote peers must send RTP to.
-    const stunResult = await stunDiscoverAddress(rtpSocket);
-    const publicIp = stunResult.ip;
-    const rtpPort = stunResult.port;
+    // STUN-discover NAT-mapped address for the RTP socket only.
+    // SIP relies on rport mechanism (RFC 3581) for NAT traversal — no STUN needed.
+    // SDP c=/m= must use the RTP socket's mapped IP and port.
+    const rtpStun = await stunDiscoverAddress(rtpSocket);
+    const publicIp = rtpStun.ip;
+    const rtpPort = rtpStun.port;
 
     yield {
       type: 'info',
       timestamp: Date.now(),
-      message: `SIP socket bound to ${localIp}:${sipPort}, RTP mapped to ${publicIp}:${rtpPort} (STUN)`
+      message: `Public IP: ${publicIp}, RTP mapped to ${publicIp}:${rtpPort} (STUN), SIP via rport on local :${sipPort}`
     };
 
     // Build SIP request
@@ -128,7 +129,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
 
     // Send request
     const startTime = Date.now();
-    const responses: Array<{ statusCode: number; statusText: string; response: string }> = [];
+    const responses: Array<{ statusCode: number; statusText: string; response: string; receivedAt: number }> = [];
     
     let socketClosed = false;
     const safeClose = () => {
@@ -141,9 +142,14 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
     
     let timedOut = false;
 
+    // RFC 3261 Timer A: INVITE retransmission for unreliable transports (UDP)
+    let retransmitTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearRetransmit = () => { if (retransmitTimer) { clearTimeout(retransmitTimer); retransmitTimer = null; } };
+
     await new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         timedOut = true;
+        clearRetransmit();
         const hasFinalResponse = responses.some(r => r.statusCode >= 200);
 
         if (responses.length === 0) {
@@ -173,7 +179,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
           const statusText = statusMatch[2].trim();
           const duration = Date.now() - startTime;
 
-          responses.push({ statusCode, statusText, response });
+          responses.push({ statusCode, statusText, response, receivedAt: Date.now() });
 
           // Log received response to session
           session.logSignaling('<<<', `RECEIVED ${statusCode} ${statusText}`, response);
@@ -183,11 +189,13 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
 
           // Close on final response (2xx, 3xx, 4xx, 5xx, 6xx) - but NOT for INVITE
           if (statusCode >= 200 && config.method !== 'INVITE') {
+            clearRetransmit();
             clearTimeout(timeoutId);
             safeClose();
             resolve();
           } else if (statusCode >= 200 && config.method === 'INVITE') {
             // For INVITE, keep socket open for ACK/BYE
+            clearRetransmit();
             clearTimeout(timeoutId);
             resolve();
           }
@@ -196,6 +204,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
       });
 
       sipSocket.on('error', (err) => {
+        clearRetransmit();
         clearTimeout(timeoutId);
         safeClose();
         reject(err);
@@ -203,9 +212,25 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
 
       sipSocket.send(sipMessage, port, host, (err) => {
         if (err) {
+          clearRetransmit();
           clearTimeout(timeoutId);
           safeClose();
           reject(err);
+          return;
+        }
+        // Start INVITE retransmission (RFC 3261 §17.1.1.2 Timer A)
+        if (config.method === 'INVITE') {
+          let retransmitDelay = 500; // T1 = 500ms
+          const scheduleRetransmit = () => {
+            retransmitTimer = setTimeout(() => {
+              if (timedOut || responses.some(r => r.statusCode >= 200)) return;
+              sipSocket.send(sipMessage, port, host);
+              retransmitDelay = Math.min(retransmitDelay * 2, 4000); // cap at T2 = 4s
+              scheduleRetransmit();
+            }, retransmitDelay);
+            retransmitTimer.unref();
+          };
+          scheduleRetransmit();
         }
       });
     });
@@ -215,7 +240,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
     for (const resp of responses) {
       yield {
         type: 'sip',
-        timestamp: Date.now(),
+        timestamp: resp.receivedAt,
         message: `Received ${resp.statusCode} ${resp.statusText}`,
         status: resp.statusCode,
         rawMessage: resp.response
@@ -576,7 +601,7 @@ export async function* runSipTest(config: TestConfig): AsyncGenerator<SipEvent> 
 function buildOptionsRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string, localIp: string, localPort: number): string {
   return [
     `OPTIONS ${uri} SIP/2.0`,
-    `Via: SIP/2.0/UDP ${localIp}:${localPort};branch=${branch}`,
+    `Via: SIP/2.0/UDP ${localIp}:${localPort};rport;branch=${branch}`,
     `From: <sip:pinmoli@pinmoli.local>;tag=${fromTag}`,
     `To: <${uri}>`,
     `Call-ID: ${callId}`,
@@ -593,7 +618,7 @@ function buildOptionsRequest(uri: string, host: string, port: number, callId: st
 function buildInviteRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string, sdp: string, localIp: string, localPort: number): string {
   return [
     `INVITE ${uri} SIP/2.0`,
-    `Via: SIP/2.0/UDP ${localIp}:${localPort};branch=${branch}`,
+    `Via: SIP/2.0/UDP ${localIp}:${localPort};rport;branch=${branch}`,
     `From: <sip:pinmoli@pinmoli.local>;tag=${fromTag}`,
     `To: <${uri}>`,
     `Call-ID: ${callId}`,
@@ -611,7 +636,7 @@ function buildInviteRequest(uri: string, host: string, port: number, callId: str
 function buildAckRequest(uri: string, host: string, port: number, callId: string, fromTag: string, toTag: string, branch: string, localIp: string, localPort: number): string {
   return [
     `ACK ${uri} SIP/2.0`,
-    `Via: SIP/2.0/UDP ${localIp}:${localPort};branch=${branch}`,
+    `Via: SIP/2.0/UDP ${localIp}:${localPort};rport;branch=${branch}`,
     `From: <sip:pinmoli@pinmoli.local>;tag=${fromTag}`,
     `To: <${uri}>${toTag ? `;tag=${toTag}` : ''}`,
     `Call-ID: ${callId}`,
@@ -627,7 +652,7 @@ function buildAckRequest(uri: string, host: string, port: number, callId: string
 function buildByeRequest(uri: string, host: string, port: number, callId: string, fromTag: string, toTag: string, branch: string, localIp: string, localPort: number): string {
   return [
     `BYE ${uri} SIP/2.0`,
-    `Via: SIP/2.0/UDP ${localIp}:${localPort};branch=${branch}`,
+    `Via: SIP/2.0/UDP ${localIp}:${localPort};rport;branch=${branch}`,
     `From: <sip:pinmoli@pinmoli.local>;tag=${fromTag}`,
     `To: <${uri}>${toTag ? `;tag=${toTag}` : ''}`,
     `Call-ID: ${callId}`,
@@ -644,7 +669,7 @@ function buildCancelRequest(uri: string, host: string, port: number, callId: str
   // CANCEL reuses the INVITE's branch and CSeq number (RFC 3261 Section 9.1)
   return [
     `CANCEL ${uri} SIP/2.0`,
-    `Via: SIP/2.0/UDP ${localIp}:${localPort};branch=${branch}`,
+    `Via: SIP/2.0/UDP ${localIp}:${localPort};rport;branch=${branch}`,
     `From: <sip:pinmoli@pinmoli.local>;tag=${fromTag}`,
     `To: <${uri}>`,
     `Call-ID: ${callId}`,
@@ -660,7 +685,7 @@ function buildCancelRequest(uri: string, host: string, port: number, callId: str
 function buildRegisterRequest(uri: string, host: string, port: number, callId: string, fromTag: string, branch: string, localIp: string, localPort: number): string {
   return [
     `REGISTER ${uri} SIP/2.0`,
-    `Via: SIP/2.0/UDP ${localIp}:${localPort};branch=${branch}`,
+    `Via: SIP/2.0/UDP ${localIp}:${localPort};rport;branch=${branch}`,
     `From: <${uri}>;tag=${fromTag}`,
     `To: <${uri}>`,
     `Call-ID: ${callId}`,

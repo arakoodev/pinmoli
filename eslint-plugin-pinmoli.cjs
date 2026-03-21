@@ -875,6 +875,121 @@ const plugin = {
         };
       },
     },
+    /* ------------------------------------------------------------------ */
+    /* Rule 16 — pinmoli/no-stun-on-sip-socket                            */
+    /*                                                                    */
+    /* STUN is a media-layer NAT discovery technique. SIP has its own     */
+    /* NAT traversal: the rport mechanism (RFC 3581). The client sends    */
+    /* ;rport in Via, and the server fills in the observed source IP:port */
+    /* from the UDP packet. Calling stunDiscoverAddress() on a SIP socket */
+    /* is wrong because:                                                  */
+    /*   1. STUN timeout → fallback to private LAN IP in Via/Contact     */
+    /*   2. STUN-mapped port != what the SIP proxy sees (symmetric NAT)  */
+    /*   3. Adds 2-3s latency for zero benefit                           */
+    /*                                                                    */
+    /* Origin: engine.ts called stunDiscoverAddress(sipSocket) in a       */
+    /* Promise.all with the RTP socket. STUN timed out, fallback returned */
+    /* 192.168.1.2, which went into Via/Contact. LiveKit's SIP proxy     */
+    /* overwrote Via to 192.168.1.2:51286 — completely unroutable.       */
+    /* ------------------------------------------------------------------ */
+    'no-stun-on-sip-socket': {
+      meta: {
+        type: 'problem',
+        docs: {
+          description:
+            'Disallow STUN discovery on SIP signaling sockets. ' +
+            'SIP uses rport (RFC 3581) for NAT traversal, not STUN.',
+        },
+        schema: [],
+        messages: {
+          stunOnSip:
+            'stunDiscoverAddress() called on SIP socket "{{name}}". ' +
+            'STUN is for RTP/media sockets only — SIP relies on the rport mechanism (RFC 3581). ' +
+            'A STUN timeout on the SIP socket falls back to a private IP in Via/Contact headers, ' +
+            'making Pinmoli unreachable for SIP responses.',
+        },
+      },
+      create(context) {
+        return {
+          CallExpression(node) {
+            // Match: stunDiscoverAddress(sipSocket), stun*(sipSock), etc.
+            const callee = node.callee;
+            let fnName = '';
+            if (callee.type === 'Identifier') {
+              fnName = callee.name;
+            } else if (
+              callee.type === 'MemberExpression' &&
+              callee.property.type === 'Identifier'
+            ) {
+              fnName = callee.property.name;
+            }
+
+            if (!/stun/i.test(fnName)) return;
+            if (node.arguments.length === 0) return;
+
+            const arg = node.arguments[0];
+            if (arg.type === 'Identifier' && /sip|signaling/i.test(arg.name)) {
+              context.report({
+                node,
+                messageId: 'stunOnSip',
+                data: { name: arg.name },
+              });
+            }
+          },
+        };
+      },
+    },
+
+    /* ------------------------------------------------------------------ */
+    /* Rule 17 — pinmoli/require-rport-in-via                             */
+    /*                                                                    */
+    /* RFC 3581: A client behind NAT SHOULD include ;rport (with no       */
+    /* value) in Via to explicitly request the server record and use the   */
+    /* actual observed source port. Without it, the server MAY use the    */
+    /* port from the Via header (which could be wrong behind NAT).        */
+    /*                                                                    */
+    /* Without rport, the temptation is to solve SIP NAT traversal with   */
+    /* STUN on the SIP socket — which is wrong (see rule 16). rport is   */
+    /* the correct, protocol-level mechanism.                             */
+    /*                                                                    */
+    /* Origin: engine.ts Via headers omitted ;rport. This led to a        */
+    /* misguided attempt to STUN the SIP socket for NAT discovery (rule   */
+    /* 16 bug), which timed out and put a private IP in Via/Contact.      */
+    /* ------------------------------------------------------------------ */
+    'require-rport-in-via': {
+      meta: {
+        type: 'problem',
+        docs: {
+          description:
+            'Require ;rport in SIP Via headers. ' +
+            'RFC 3581 — client must request rport for NAT traversal.',
+        },
+        schema: [],
+        messages: {
+          missingRport:
+            'Via header missing ;rport parameter. RFC 3581 requires ;rport for reliable ' +
+            'NAT traversal. Without it, the server may use the Via port (wrong behind NAT) ' +
+            'instead of the observed source port. Add ;rport before ;branch=.',
+        },
+      },
+      create(context) {
+        return {
+          TemplateLiteral(node) {
+            // Build the full quasi text (ignoring expressions)
+            const quasiText = node.quasis.map(q => q.value.raw).join('*');
+            if (!/Via:\s*SIP\/2\.0/i.test(quasiText)) return;
+            if (/;rport/.test(quasiText)) return;
+            context.report({ node, messageId: 'missingRport' });
+          },
+          Literal(node) {
+            if (typeof node.value !== 'string') return;
+            if (!/Via:\s*SIP\/2\.0/i.test(node.value)) return;
+            if (/;rport/.test(node.value)) return;
+            context.report({ node, messageId: 'missingRport' });
+          },
+        };
+      },
+    },
   },
 };
 

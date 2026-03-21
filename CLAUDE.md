@@ -85,7 +85,7 @@ docker compose build && docker compose up -d
 
 ## Lint Rules (`eslint-plugin-pinmoli`)
 
-Custom ESLint plugin at `eslint-plugin-pinmoli.cjs` with 15 rules extracted from real bugs:
+Custom ESLint plugin at `eslint-plugin-pinmoli.cjs` with 17 rules extracted from real bugs:
 
 - **`pinmoli/no-console-in-lib`** — `console.*` in library code corrupts the TUI display
 - **`pinmoli/no-process-exit`** — `process.exit()` skips SIP cleanup (no BYE, no socket close)
@@ -102,6 +102,8 @@ Custom ESLint plugin at `eslint-plugin-pinmoli.cjs` with 15 rules extracted from
 - **`pinmoli/no-silent-transcode-fallback`** — Transcode functions must throw for unsupported codecs, not silently return input unchanged
 - **`pinmoli/no-incomplete-enum-description`** — TypeBox `Type.Union` descriptions must mention all `Type.Literal` values. The LLM reads descriptions to determine valid inputs; missing values cause the LLM to reject valid options
 - **`pinmoli/require-cancel-with-invite`** — Files that build INVITE requests must also handle CANCEL. RFC 3261 requires CANCEL when giving up on a pending INVITE
+- **`pinmoli/no-stun-on-sip-socket`** — `stunDiscoverAddress()` on a SIP/signaling socket is wrong. SIP uses `rport` (RFC 3581), not STUN. STUN timeout falls back to private IP in Via/Contact
+- **`pinmoli/require-rport-in-via`** — Via headers must include `;rport`. RFC 3581 — without it, server may route responses to the wrong port behind NAT
 
 Run `docker compose exec pinmoli npm run lint` before committing.
 
@@ -126,8 +128,11 @@ Run `docker compose exec pinmoli npm run lint` before committing.
 8. **Transcode must throw for unsupported codecs** — `transcodePcmuTo()` throws for codecs without an encoder (e.g. opus). Never silently return input unchanged. Lint rule: `pinmoli/no-silent-transcode-fallback`
 9. **Schema descriptions must list all valid values** — TypeBox `Type.Union` descriptions are the primary way the LLM learns what a parameter accepts. If the description mentions only a subset, the LLM rejects the rest. Lint rule: `pinmoli/no-incomplete-enum-description`
 10. **Send CANCEL for unanswered INVITEs** — when INVITE times out with only provisional (1xx) responses, send CANCEL before closing sockets. RFC 3261 Section 9. Lint rule: `pinmoli/require-cancel-with-invite`
-11. **STUN before SDP** — always call `stunDiscoverAddress(rtpSocket)` from `src/network/utils.ts` before building SDP. Use the returned public IP:port for SDP `c=` line and SIP Via/Contact. WSL2/Docker private IPs are unreachable from the internet
+11. **STUN the RTP socket only** — call `stunDiscoverAddress(rtpSocket)` before building SDP. Use the returned IP for SDP `c=` line and Via IP. Use the returned port ONLY for SDP `m=` line. For Via/Contact *port*, use the local SIP socket port — SIP uses `rport` for port discovery, not STUN. Never STUN the SIP socket. Lint rule: `pinmoli/no-stun-on-sip-socket`
 12. **Send audio then listen** — `responseWaitTime` counts from AFTER `sendRTPFromSocket()` completes, not concurrently. The agent may take 15-20s to process audio
+13. **Via headers must include `;rport`** — RFC 3581. Add `;rport` (no value) before `;branch=` in every Via header. The SIP server fills in the observed source IP:port, which is the correct NAT traversal mechanism for SIP. Without `rport`, response routing through symmetric NAT fails silently. Lint rule: `pinmoli/require-rport-in-via`
+14. **INVITE requires retransmission (Timer A)** — RFC 3261 §17.1.1.2: UDP is unreliable, so the UAC MUST retransmit INVITE at T1=500ms, doubling each time up to T2=4s cap. Without retransmission, a single lost UDP packet means the call silently fails. Clear the retransmit timer on any final response (≥200), timeout, or error
+15. **Store timestamps at collection time, not yield time** — when collecting SIP responses in an array, store `receivedAt: Date.now()` immediately. If you defer timestamping to when the response is yielded/processed, all responses appear at the same time (the moment the loop runs), hiding the actual response timeline
 
 ## WebRTC / WHIP Architecture
 

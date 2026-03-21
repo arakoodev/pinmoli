@@ -529,6 +529,73 @@ describe('pinmoli/require-cancel-with-invite', () => {
   });
 });
 
+// ---------- Rule 16: no-stun-on-sip-socket ----------
+
+describe('pinmoli/no-stun-on-sip-socket', () => {
+  it('flags STUN discovery on SIP/signaling sockets', () => {
+    ruleTester.run('no-stun-on-sip-socket', plugin.rules['no-stun-on-sip-socket'], {
+      valid: [
+        // STUN on RTP socket — correct usage
+        'stunDiscoverAddress(rtpSocket)',
+        // STUN on media socket — correct usage
+        'stunDiscoverAddress(mediaSocket)',
+        // Not a STUN call at all
+        'discoverAddress(sipSocket)',
+        // No arguments
+        'stunDiscoverAddress()',
+      ],
+      invalid: [
+        // The exact bug: STUN on sipSocket
+        {
+          code: 'stunDiscoverAddress(sipSocket)',
+          errors: [{ messageId: 'stunOnSip', data: { name: 'sipSocket' } }],
+        },
+        // Signaling socket variant
+        {
+          code: 'stunDiscoverAddress(signalingSocket)',
+          errors: [{ messageId: 'stunOnSip', data: { name: 'signalingSocket' } }],
+        },
+        // Method call variant
+        {
+          code: 'stun.discover(sipSock)',
+          errors: [{ messageId: 'stunOnSip', data: { name: 'sipSock' } }],
+        },
+      ],
+    });
+  });
+});
+
+// ---------- Rule 17: require-rport-in-via ----------
+
+describe('pinmoli/require-rport-in-via', () => {
+  it('flags Via headers missing ;rport', () => {
+    ruleTester.run('require-rport-in-via', plugin.rules['require-rport-in-via'], {
+      valid: [
+        // Via with rport — correct
+        '`Via: SIP/2.0/UDP ${ip}:${port};rport;branch=${branch}`',
+        // String literal with rport
+        '"Via: SIP/2.0/UDP 1.2.3.4:5060;rport;branch=z9hG4bK"',
+        // Not a Via header at all
+        '`From: SIP/2.0 someone`',
+        // Random string
+        '"hello world"',
+      ],
+      invalid: [
+        // The exact bug: Via without rport
+        {
+          code: '`Via: SIP/2.0/UDP ${ip}:${port};branch=${branch}`',
+          errors: [{ messageId: 'missingRport' }],
+        },
+        // String literal without rport
+        {
+          code: '"Via: SIP/2.0/UDP 1.2.3.4:5060;branch=z9hG4bK"',
+          errors: [{ messageId: 'missingRport' }],
+        },
+      ],
+    });
+  });
+});
+
 // ---------- Rule 12: no-silent-transcode-fallback ----------
 
 describe('pinmoli/no-silent-transcode-fallback', () => {
