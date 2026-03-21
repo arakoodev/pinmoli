@@ -89,9 +89,9 @@ export const TestConfigSchema = Type.Object({
   mediaPort: Type.Number({ minimum: 1024, maximum: 65535, default: 10000 }),
   timeout: Type.Number({
     minimum: 1000,
-    default: 5000,
-    description: 'SIP transaction timeout in milliseconds.',
-    examples: [5000, 30000]
+    default: 30000,
+    description: 'SIP transaction timeout in milliseconds. 30000 recommended for INVITE (voice agents need time to answer).',
+    examples: [10000, 30000, 60000]
   }),
   audioSample: Type.Optional(AudioSampleSchema),
   responseWaitTime: Type.Optional(Type.Number({
