@@ -66,8 +66,8 @@ describe('Tool Registry', () => {
   });
 
   describe('ALLOWED_TOOLS', () => {
-    it('contains exactly 7 tools', () => {
-      expect(ALLOWED_TOOLS).toHaveLength(7);
+    it('contains exactly 8 tools', () => {
+      expect(ALLOWED_TOOLS).toHaveLength(8);
       expect(ALLOWED_TOOLS).toEqual([
         'sip_test',
         'webrtc_test',
@@ -75,7 +75,8 @@ describe('Tool Registry', () => {
         'save_test',
         'load_test',
         'list_tests',
-        'generate_audio'
+        'generate_audio',
+        'replay_session'
       ]);
     });
   });

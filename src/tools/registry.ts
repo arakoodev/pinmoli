@@ -17,7 +17,8 @@ export const ALLOWED_TOOLS = [
   'save_test',
   'load_test',
   'list_tests',
-  'generate_audio'
+  'generate_audio',
+  'replay_session'
 ] as const;
 
 export type AllowedToolName = typeof ALLOWED_TOOLS[number];

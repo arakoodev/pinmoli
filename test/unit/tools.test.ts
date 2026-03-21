@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { registerAllTools, getAllTools, saveTestTool, loadTestTool, listTestsTool } from '../../src/tools/index.js';
 
   describe('Tool Registration', () => {
-    it('registers all 7 tools', () => {
+    it('registers all 8 tools', () => {
       registerAllTools();
       const tools = getAllTools();
 
-      expect(tools).toHaveLength(7);
+      expect(tools).toHaveLength(8);
 
       const toolNames = tools.map(t => t.name);
       expect(toolNames).toContain('sip_test');
@@ -16,6 +16,7 @@ import { registerAllTools, getAllTools, saveTestTool, loadTestTool, listTestsToo
       expect(toolNames).toContain('load_test');
       expect(toolNames).toContain('list_tests');
       expect(toolNames).toContain('generate_audio');
+      expect(toolNames).toContain('replay_session');
     });
   it('all tools have required properties', () => {
     registerAllTools();

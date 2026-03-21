@@ -11,7 +11,7 @@
  *   npx tsx src/cli-replay.ts <session-path>
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, mkdirSync, copyFileSync } from 'fs';
 import { resolve, basename } from 'path';
 import { initCliSession, initManifest, getSessionRoot } from './network/session.js';
 import { readFlowJson, formatFlow, compareFlows } from './network/flow.js';
@@ -74,6 +74,21 @@ Results are written to a new session directory under captures/.
   // ---- Create replay session ----
   const replayRoot = initCliSession();
   initManifest(manifest.provider, manifest.model);
+
+  // Copy audio-samples/ from source session so replay can find generated TTS files
+  const srcAudio = resolve(absPath, 'audio-samples');
+  if (existsSync(srcAudio)) {
+    const dstAudio = resolve(replayRoot, 'audio-samples');
+    mkdirSync(dstAudio, { recursive: true });
+    const audioFiles = readdirSync(srcAudio).filter(f => f.endsWith('.wav'));
+    for (const file of audioFiles) {
+      copyFileSync(resolve(srcAudio, file), resolve(dstAudio, file));
+    }
+    if (audioFiles.length > 0) {
+      process.stderr.write(`Copied ${audioFiles.length} audio sample(s) from source session\n`);
+    }
+  }
+
   process.stderr.write(`\nReplay:   ${replayRoot}\n\n`);
 
   // Register tools

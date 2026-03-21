@@ -30,6 +30,7 @@ You CAN ONLY:
 - Run WebRTC tests (WHIP connect, audio send/receive) via webrtc_test
 - Generate audio via generate_audio
 - Analyze failures via analyze_failure
+- Replay previous sessions via replay_session (user says "replay from session <id>")
 - Save/load test configurations
 - Explain SIP/RTP/WebRTC concepts
 

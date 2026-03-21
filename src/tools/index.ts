@@ -11,9 +11,10 @@ import { loadTestTool } from './load-test.js';
 import { listTestsTool } from './list-tests.js';
 import { generateAudioTool } from './generate-audio.js';
 import { webrtcTestTool } from './webrtc-test.js';
+import { replaySessionTool } from './replay-session.js';
 
 /**
- * Register all tools (SIP + WebRTC)
+ * Register all tools (SIP + WebRTC + replay)
  * This is the only way to register tools - no dynamic registration
  */
 export function registerAllTools(): void {
@@ -24,6 +25,7 @@ export function registerAllTools(): void {
   registerTool(loadTestTool);
   registerTool(listTestsTool);
   registerTool(generateAudioTool);
+  registerTool(replaySessionTool);
 }
 
 /**

@@ -14,7 +14,7 @@ This skill provides context for AI assistants working on the Pinmoli codebase.
 A specialized, domain-restricted AI agent for SIP/WebRTC testing. Think "Postman with Agent Mode" but exclusively for voice protocols. Multi-provider LLM support (Anthropic, OpenAI, Gemini, Groq, OpenRouter).
 
 **Key Constraints:**
-- Exactly 7 tools (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests)
+- Exactly 8 tools (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests, replay_session)
 - Domain-restricted to SIP/WebRTC testing only
 - No file editing, no bash commands -- voice protocol testing only
 - Built on pi-mono libraries (pi-agent-core, pi-ai, pi-tui)
@@ -34,11 +34,12 @@ Agent Runtime (src/agent/runtime.ts)
   - System prompt (domain restricted)
   |
   v
-7 Tools (src/tools/)
+8 Tools (src/tools/)
   - sip_test      -- SIP INVITE/OPTIONS/REGISTER
   - webrtc_test   -- WebRTC via WHIP (RFC 9725)
   - generate_audio -- ffmpeg/espeak audio generation
   - analyze_failure -- Pattern-matched diagnostics
+  - replay_session -- Re-execute a recorded session's tool calls
   - save/load/list_tests -- SQLite + FTS5
   |
   v
@@ -71,7 +72,7 @@ src/
 │   ├── tool-output.ts        # Collapsible tool result rendering
 │   └── test-terminal.ts      # Test-mode Terminal implementation
 ├── tools/
-│   ├── registry.ts           # 7-tool allowlist enforcement
+│   ├── registry.ts           # 8-tool allowlist enforcement
 │   ├── index.ts              # Tool registration (TypeBox schemas)
 │   ├── sip-test.ts           # SIP test execution
 │   ├── webrtc-test.ts        # WebRTC test execution
