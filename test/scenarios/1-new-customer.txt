@@ -1,0 +1,5 @@
+Start an interactive call to sip:+18144693283@5789pyhutlx.sip.livekit.cloud
+Send the voice-hello sample on the active call, then listen for 10 seconds for the agent greeting
+Generate Japanese speech using gemini TTS with text "こんにちは、新規のお客様です" and filename new-customer-greeting, then send it on the active call, then listen for 20 seconds
+Generate Japanese speech using gemini TTS with text "蜂蜜について教えてください" and filename ask-about-honey, then send it on the active call, then listen for 20 seconds
+End the call

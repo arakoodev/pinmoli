@@ -1,0 +1,4 @@
+Start an interactive call to sip:+18144693283@5789pyhutlx.sip.livekit.cloud
+Send the voice-hello sample on the active call, then listen for 15 seconds for the agent greeting
+Stay silent. Just listen on the active call for 20 seconds without sending anything. I want to test how the agent handles silence.
+End the call
