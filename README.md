@@ -41,6 +41,8 @@ Pinmoli: Running INVITE test against sip:+15551234567@trunk.example.com...
 - **Failure analysis** -- pattern-matched diagnostics with actionable recovery steps
 - **Test persistence** -- save, load, list test configs (SQLite + FTS5)
 - **Per-session output** -- each run creates a directory with signaling logs, metadata, flow.json, audio WAVs
+- **Interactive multi-turn calls** -- start_call → send_audio → receive_audio → end_call, with live TUI indicators
+- **Snapshot replay** -- replay saved interactive calls from WAV files against the live endpoint, compare results
 - **Session replay** -- re-execute recorded sessions without LLM, compare flows
 - **Automatic packet capture** -- SIP + RTP traffic to pcap (Wireshark-ready)
 - **Pipe mode** -- stdin/stdout for scripting and CI
@@ -241,6 +243,165 @@ docker compose exec pinmoli npx tsx -e "
   })) { console.log(JSON.stringify(event)); }
 "
 ```
+
+## Multi-Turn Interactive Calls
+
+Beyond one-shot tests (`sip_test`), Pinmoli supports **interactive multi-turn SIP conversations** — call a voice agent, listen to its greeting, speak back, listen to its response, repeat. The call stays open across tool calls, and the AI agent drives the conversation.
+
+### The Interactive Tools
+
+| Tool | Purpose |
+|------|---------|
+| `start_call` | INVITE → 200 OK → ACK. Returns a `callId` for subsequent tools |
+| `send_audio` | Send a WAV file (auto-wired from `generate_audio`) or DTMF digits |
+| `receive_audio` | Listen for agent audio for N seconds (max 60), save as WAV |
+| `end_call` | BYE → close sockets → cleanup |
+
+### Example: Two-Turn Conversation
+
+Tell the TUI what you want in plain English:
+
+```
+You: Call sip:+18144693283@5789pyhutlx.sip.livekit.cloud and have
+     a two-turn conversation. Say hello twice, listen between each.
+```
+
+The agent orchestrates the call through the four tools. Each tool appears as a collapsible section in the TUI with real-time event streaming:
+
+```
+ ▼ ⠙ start_call (12 events)                    ← bright yellow, animated spinner
+   [INFO] +0.045s Starting SIP INVITE to sip:+18144693283@...
+   [INFO] +0.058s Public IP: 34.56.78.90, RTP mapped to :54321 (STUN)
+   [SIP]  +0.321s Sending INVITE request...
+   [SIP]  +0.493s Received 100 Processing
+   [SIP]  +2.100s Received 180 Ringing
+   [SIP]  +5.850s Received 200 OK
+   [INFO] +5.851s Codec negotiated: PCMU (PT=0, clock=8000Hz)
+   [SIP]  +5.852s Sending ACK
+   [INFO] +5.853s Call established — callId: abc123, codec: PCMU
+ ▶ ✓ start_call (12 events)                     ← auto-collapses, checkmark
+
+ ▼ ⠧ send_audio (2 events)                      ← turn 1: send greeting
+   [INFO] +0.015s Sending audio as PCMU to 34.56.78.90:10000
+   [INFO] +3.200s Sent 260 RTP packets — saved: sent-audio-1.wav
+ ▶ ✓ send_audio (2 events)
+
+ ▼ ⠸ receive_audio (2 events)                   ← turn 1: agent responds
+   [INFO] +0.008s Listening for audio on port 54321 (15s)...
+   [INFO] +12.340s Received 735 RTP packets — saved: agent-response-2.wav
+ ▶ ✓ receive_audio (2 events)
+
+ ▼ ⠴ send_audio (2 events)                      ← turn 2: send again
+   [INFO] +0.012s Sending audio as PCMU to 34.56.78.90:10000
+   [INFO] +3.180s Sent 258 RTP packets — saved: sent-audio-3.wav
+ ▶ ✓ send_audio (2 events)
+
+ ▼ ⠦ receive_audio (2 events)                   ← turn 2: agent responds
+   [INFO] +0.009s Listening for audio on port 54321 (15s)...
+   [INFO] +14.100s Received 740 RTP packets — saved: agent-response-5.wav
+ ▶ ✓ receive_audio (2 events)
+
+ ▼ ⠙ end_call (2 events)                        ← hang up
+   [SIP]  +0.100s Sending BYE
+   [SIP]  +0.200s Call terminated
+ ▶ ✓ end_call (2 events)
+```
+
+### How to Know if a Call is Active
+
+The TUI's `ToolOutputSection` component shows call state visually:
+
+| Indicator | Meaning |
+|-----------|---------|
+| `▼ ⠧ start_call (5 events)` | **Running** — bright yellow header, animated braille spinner cycling at 80ms (⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏), section expanded, events streaming live |
+| `▶ ✓ receive_audio (2 events)` | **Succeeded** — dimmed header, checkmark, section auto-collapsed |
+| `▶ ✗ start_call (8 events)` | **Failed** — dimmed header, X mark, section auto-collapsed |
+
+**The spinner is the primary active-call indicator.** During `receive_audio`, it keeps spinning for the entire listen duration (up to 60 seconds) — you can see at a glance that a call is alive and recording.
+
+**Ctrl+O** toggles expansion of the last completed tool section to re-inspect events.
+
+**Between tool calls**, the call is still active even though no section is spinning. The agent tracks the `callId` in its conversation context and knows the call is open until `end_call`. If you ask "is the call still active?" the agent can answer based on whether it has called `end_call` yet.
+
+**On exit (Ctrl+C)**, `terminateAll()` sends BYE on every active call before the process exits — no orphaned calls.
+
+### Listen-First Pattern
+
+Some agents speak first. Listen before sending:
+
+```
+You: Call the agent, wait 8 seconds for its greeting, then respond.
+```
+
+The agent calls `receive_audio` immediately after `start_call` (before any `send_audio`), capturing the agent's opening message.
+
+### Session Artifacts
+
+Each interactive call writes to its own directory under `captures/`:
+
+```
+captures/20260323-140530-x7k2/
+  sip-invite-5789pyhutlx.sip.livekit.cloud-20260323-140530/
+    sip-log.txt               ← raw SIP messages (>>>SENT, <<<RECEIVED)
+    metadata.json              ← duration, codec, success, turn count
+    sent-audio-1.wav           ← what you sent (turn 1)
+    agent-response-2.wav       ← what the agent said (turn 1)
+    sent-audio-3.wav           ← what you sent (turn 2)
+    agent-response-4.wav       ← what the agent said (turn 2)
+    scenario-manifest.json     ← turn structure for snapshot replay
+    flow.json                  ← structured event timeline
+```
+
+File numbering follows the turn counter: sends get odd numbers (1, 3, 5...), receives get even numbers (2, 4, 6...).
+
+### Snapshot Replay
+
+After running interactive scenarios, replay the exact same conversation from saved WAV files — no TTS, no LLM:
+
+```bash
+# Run scenarios to generate snapshots
+docker compose exec pinmoli npx tsx test/scenarios/run-scenarios.ts
+
+# Replay all scenarios from a session
+docker compose exec pinmoli npx tsx src/cli-replay-snapshot.ts captures/20260323-140530-x7k2
+
+# Replay one specific scenario
+docker compose exec pinmoli npx tsx src/cli-replay-snapshot.ts \
+  captures/20260323-140530-x7k2 --scenario 2-multi-turn
+```
+
+The replay engine reads `scenario-manifest.json`, opens a real SIP call to the same URI, sends the same audio files in order, listens for the same durations, and compares:
+
+- **Signaling sequence** — INVITE/100/180/200/ACK/BYE must match
+- **Per-turn audio match** — both original and replay got audio, or both got silence
+- **Packet count tolerance** — within 30% (agent speech varies between runs)
+
+```
+--- 2-multi-turn ---
+Turn 1: 710 pkts (original: 735) — MATCH
+Turn 2: 698 pkts (original: 740) — MATCH
+  PASS | 37.2s (original: 37.0s)
+  Sequence: MATCH
+  Codec: PCMU (match)
+```
+
+### Programmatic Scenarios
+
+The scenario runner exercises multi-turn calls without an LLM:
+
+```bash
+docker compose exec pinmoli npx tsx test/scenarios/run-scenarios.ts
+```
+
+| Scenario | Turns | Description |
+|----------|-------|-------------|
+| `1-new-customer` | 1 | Send greeting, listen for response |
+| `2-multi-turn` | 2 | Greeting + follow-up |
+| `3-listen-first` | 1 | Listen 8s for agent greeting before speaking |
+| `4-silence-test` | 1+extra | Send once, then listen without speaking (timeout behavior) |
+| `5-rapid-exchange` | 3 | Three quick turns — RTP continuity stress test |
+
+Each scenario writes `scenario-manifest.json` + `flow.json` for later snapshot replay.
 
 ## Examples
 
@@ -451,12 +612,28 @@ Generate speech with gemini saying "Hello, I need help with my account"
 
 ## Tools
 
-Pinmoli exposes 7 tools to the AI agent. You describe what you want and the agent picks the right tool. See [SKILLS.md](./SKILLS.md) for full parameter reference.
+Pinmoli exposes 11 tools to the AI agent. You describe what you want and the agent picks the right tool.
+
+**One-shot tests:**
 
 | Tool | Purpose |
 |------|---------|
 | `sip_test` | Run OPTIONS, INVITE, or REGISTER against a SIP endpoint. Supports DTMF. |
 | `webrtc_test` | Connect to a WHIP endpoint, negotiate ICE/DTLS/SRTP, send/receive audio. Supports DTMF. |
+
+**Interactive multi-turn calls:**
+
+| Tool | Purpose |
+|------|---------|
+| `start_call` | INVITE → 200 OK → ACK. Returns `callId` for subsequent tools. |
+| `send_audio` | Send audio (auto-wired from `generate_audio`) or DTMF on an active call. |
+| `receive_audio` | Listen for agent audio on an active call (1-60s), save as WAV. |
+| `end_call` | BYE → close sockets → cleanup. Always call when done. |
+
+**Utilities:**
+
+| Tool | Purpose |
+|------|---------|
 | `generate_audio` | Create audio samples (sine, DTMF, silence, TTS via espeak or Gemini). |
 | `analyze_failure` | Diagnose a failed test and suggest fixes. |
 | `save_test` | Save a test configuration by name (SQLite). |
