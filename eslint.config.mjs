@@ -91,6 +91,15 @@ export default [
       'pinmoli/require-cancel-with-invite': 'error',
       'pinmoli/no-stun-on-sip-socket': 'error',
       'pinmoli/require-rport-in-via': 'error',
+      'pinmoli/no-unguarded-post-close-write': 'error',
+    },
+  },
+
+  // Test scenarios: guard post-close writes
+  {
+    files: ['test/scenarios/**/*.ts'],
+    rules: {
+      'pinmoli/no-unguarded-post-close-write': 'error',
     },
   },
 

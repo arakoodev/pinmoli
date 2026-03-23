@@ -13,6 +13,10 @@ import { initCliSession } from '../../src/network/session.js';
 import { terminateAll } from '../../src/sip/call-store.js';
 import type { CallHandle } from '../../src/sip/call-store.js';
 import type { TestEvent } from '../../src/validation/schemas.js';
+import { writeFileSync } from 'fs';
+import { basename, resolve } from 'path';
+import { buildFlowFromEvents, writeFlowJson } from '../../src/network/flow.js';
+import type { ScenarioManifest } from '../../src/sip/replay-snapshot.js';
 
 const SIP_URI = `sip:${process.env.LIVEKIT_PHONE || '+18144693283'}@${process.env.LIVEKIT_SIP_ENDPOINT || '5789pyhutlx.sip.livekit.cloud'}`;
 
@@ -85,6 +89,7 @@ interface ScenarioResult {
   totalPacketsSent: number;
   turns: number;
   durationMs: number;
+  sessionDir?: string;
   error?: string;
   events: TestEvent[];
 }
@@ -99,6 +104,12 @@ async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
   let callEstablished = false;
   let byeSent = false;
 
+  // Per-turn tracking for scenario manifest
+  const turnInfos: ScenarioManifest['turns'] = [];
+  const extraListenInfos: ScenarioManifest['extraListens'] = [];
+  let greetingAudioFile: string | undefined;
+  let greetingPacketsReceived: number | undefined;
+
   try {
     // Open dialog
     handle = await openDialog({ uri: SIP_URI, codecs: ['PCMU'], timeout: 30000 }, emit);
@@ -108,6 +119,8 @@ async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
     if (scenario.greetingListen > 0) {
       const greeting = await receiveAudio(handle, scenario.greetingListen, emit);
       totalIn += greeting.packetsReceived;
+      greetingAudioFile = basename(greeting.filePath);
+      greetingPacketsReceived = greeting.packetsReceived;
     }
 
     // Execute turns
@@ -118,19 +131,58 @@ async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
         totalOut += handle.rtpStreamState?.packetsSent ?? 0;
       }
 
+      const sendFile = `sent-audio-${handle.turnCounter}.wav`;
       const result = await receiveAudio(handle, turn.listenSeconds, emit);
       totalIn += result.packetsReceived;
+
+      turnInfos.push({
+        sendAudioFile: sendFile,
+        listenSeconds: turn.listenSeconds,
+        responseAudioFile: basename(result.filePath),
+        packetsReceived: result.packetsReceived,
+      });
     }
 
     // Silence phase for scenario 4
     if (scenario.name === '4-silence-test') {
       const silence = await receiveAudio(handle, 15, emit);
       totalIn += silence.packetsReceived;
+      extraListenInfos.push({
+        listenSeconds: 15,
+        audioFile: basename(silence.filePath),
+        packetsReceived: silence.packetsReceived,
+      });
     }
 
     // Close
     await closeDialog(handle, emit);
     byeSent = true;
+
+    // Write scenario manifest + flow.json for replay (non-critical)
+    try {
+      const flow = buildFlowFromEvents(events, { protocol: 'sip', method: 'INVITE', uri: SIP_URI });
+      writeFlowJson(handle.session, flow);
+
+      const manifest: ScenarioManifest = {
+        version: 1,
+        scenario: scenario.name,
+        description: scenario.description,
+        uri: SIP_URI,
+        codecs: ['PCMU'],
+        greetingListen: scenario.greetingListen,
+        ...(greetingAudioFile && { greetingAudioFile }),
+        ...(greetingPacketsReceived !== undefined && { greetingPacketsReceived }),
+        turns: turnInfos,
+        extraListens: extraListenInfos,
+        result: {
+          passed: callEstablished && byeSent,
+          durationMs: Date.now() - t0,
+          totalPacketsSent: totalOut,
+          totalPacketsReceived: totalIn,
+        },
+      };
+      writeFileSync(handle.session.file('scenario-manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+    } catch { /* don't mask scenario result */ }
 
     return {
       name: scenario.name,
@@ -142,6 +194,7 @@ async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
       totalPacketsSent: totalOut,
       turns: scenario.turns.length,
       durationMs: Date.now() - t0,
+      sessionDir: handle.session.dir,
       events,
     };
   } catch (error) {
@@ -160,6 +213,7 @@ async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
       totalPacketsSent: totalOut,
       turns: scenario.turns.length,
       durationMs: Date.now() - t0,
+      sessionDir: handle?.session.dir,
       error: error instanceof Error ? error.message : String(error),
       events,
     };
@@ -208,8 +262,6 @@ async function main() {
   }
 
   // Write JSON results to session dir
-  const { writeFileSync } = await import('fs');
-  const { resolve } = await import('path');
   const jsonResults = results.map(({ events: _e, ...rest }) => rest);
   writeFileSync(resolve(sessionRoot, 'scenario-results.json'), JSON.stringify(jsonResults, null, 2) + '\n');
   log(`\nResults written to: ${sessionRoot}/scenario-results.json`);

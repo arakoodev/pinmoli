@@ -640,3 +640,78 @@ describe('pinmoli/no-silent-transcode-fallback', () => {
     });
   });
 });
+
+// ---------- Rule 18: no-unguarded-post-close-write ----------
+
+describe('pinmoli/no-unguarded-post-close-write', () => {
+  it('flags writeFileSync/writeFlowJson after closeDialog without try/catch', () => {
+    ruleTester.run('no-unguarded-post-close-write', plugin.rules['no-unguarded-post-close-write'], {
+      valid: [
+        // Write guarded by nested try/catch — correct
+        `try {
+          closeDialog(handle, emit);
+          try { writeFileSync("foo", "bar"); } catch {}
+        } catch (error) {}`,
+        // Write BEFORE closeDialog — not relevant
+        `try {
+          writeFileSync("foo", "bar");
+          closeDialog(handle, emit);
+        } catch (error) {}`,
+        // No closeDialog — not relevant
+        `try {
+          writeFileSync("foo", "bar");
+        } catch (error) {}`,
+        // closeDialog in a different try block
+        `try {
+          doStuff();
+        } catch (error) {}`,
+        // Both writes inside nested try
+        `try {
+          closeDialog(handle, emit);
+          try {
+            writeFlowJson(session, flow);
+            writeFileSync("foo", "bar");
+          } catch {}
+        } catch (error) {}`,
+      ],
+      invalid: [
+        // writeFileSync after closeDialog — the original bug
+        {
+          code: `try {
+            closeDialog(handle, emit);
+            writeFileSync("foo", "bar");
+          } catch (error) {}`,
+          errors: [{ messageId: 'unguarded', data: { fn: 'writeFileSync' } }],
+        },
+        // writeFlowJson after closeDialog
+        {
+          code: `try {
+            closeDialog(handle, emit);
+            writeFlowJson(session, flow);
+          } catch (error) {}`,
+          errors: [{ messageId: 'unguarded', data: { fn: 'writeFlowJson' } }],
+        },
+        // Multiple unguarded writes
+        {
+          code: `try {
+            closeDialog(handle, emit);
+            writeFlowJson(session, flow);
+            writeFileSync("foo", "bar");
+          } catch (error) {}`,
+          errors: [
+            { messageId: 'unguarded', data: { fn: 'writeFlowJson' } },
+            { messageId: 'unguarded', data: { fn: 'writeFileSync' } },
+          ],
+        },
+        // await closeDialog variant
+        {
+          code: `try {
+            await closeDialog(handle, emit);
+            writeFileSync("manifest.json", data);
+          } catch (error) {}`,
+          errors: [{ messageId: 'unguarded', data: { fn: 'writeFileSync' } }],
+        },
+      ],
+    });
+  });
+});

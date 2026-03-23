@@ -990,6 +990,72 @@ const plugin = {
         };
       },
     },
+
+    /* ------------------------------------------------------------------ */
+    /* Rule 18 — pinmoli/no-unguarded-post-close-write                     */
+    /*                                                                    */
+    /* writeFileSync() or writeFlowJson() after closeDialog() inside a    */
+    /* try block, without its own try/catch, is dangerous. If the write   */
+    /* throws (disk full, permissions), the outer catch returns a "call   */
+    /* failed" result even though the SIP call itself succeeded.          */
+    /*                                                                    */
+    /* Origin: run-scenarios.ts wrote scenario-manifest.json after        */
+    /* closeDialog(). A writeFileSync failure would fall into the outer   */
+    /* catch that returns passed:false — misrepresenting a successful     */
+    /* call as failed.                                                    */
+    /* ------------------------------------------------------------------ */
+    'no-unguarded-post-close-write': {
+      meta: {
+        type: 'problem',
+        docs: {
+          description:
+            'Require try/catch around file writes after closeDialog(). ' +
+            'A disk error during post-call bookkeeping masks the successful call result.',
+        },
+        schema: [],
+        messages: {
+          unguarded:
+            '{{fn}}() after closeDialog() is not guarded by its own try/catch. ' +
+            'If this write throws (disk full, permissions), the outer catch will ' +
+            'misreport the call as failed. Wrap post-close writes in try { } catch { }.',
+        },
+      },
+      create(context) {
+        return {
+          TryStatement(node) {
+            const block = node.block;
+            if (!block || block.type !== 'BlockStatement') return;
+
+            let afterClose = false;
+
+            for (const stmt of block.body) {
+              if (!afterClose) {
+                if (astContainsCall(stmt, 'closeDialog')) {
+                  afterClose = true;
+                }
+                continue;
+              }
+
+              // Nested try blocks are guarded — skip
+              if (stmt.type === 'TryStatement') continue;
+
+              // Flag unguarded write calls after closeDialog
+              const WRITE_FNS = ['writeFileSync', 'writeFlowJson'];
+              for (const fn of WRITE_FNS) {
+                const writeNodes = findCallNodes(stmt, fn);
+                for (const writeNode of writeNodes) {
+                  context.report({
+                    node: writeNode,
+                    messageId: 'unguarded',
+                    data: { fn },
+                  });
+                }
+              }
+            }
+          },
+        };
+      },
+    },
   },
 };
 
@@ -1244,6 +1310,55 @@ function containsReturn(node) {
     return node.body.some(s => containsReturn(s));
   }
   return false;
+}
+
+/**
+ * Check if an AST subtree contains a call to the named function.
+ */
+function astContainsCall(node, fnName) {
+  if (!node || typeof node !== 'object') return false;
+  if (node.type === 'CallExpression') {
+    const c = node.callee;
+    if (c.type === 'Identifier' && c.name === fnName) return true;
+    if (c.type === 'MemberExpression' && c.property && c.property.type === 'Identifier' && c.property.name === fnName) return true;
+  }
+  for (const key of Object.keys(node)) {
+    if (key === 'parent') continue;
+    const child = node[key];
+    if (Array.isArray(child)) {
+      for (const item of child) {
+        if (item && typeof item.type === 'string' && astContainsCall(item, fnName)) return true;
+      }
+    } else if (child && typeof child.type === 'string') {
+      if (astContainsCall(child, fnName)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Find all CallExpression nodes for the named function in an AST subtree.
+ */
+function findCallNodes(node, fnName) {
+  const results = [];
+  if (!node || typeof node !== 'object') return results;
+  if (node.type === 'CallExpression') {
+    const c = node.callee;
+    if (c.type === 'Identifier' && c.name === fnName) results.push(node);
+    if (c.type === 'MemberExpression' && c.property && c.property.type === 'Identifier' && c.property.name === fnName) results.push(node);
+  }
+  for (const key of Object.keys(node)) {
+    if (key === 'parent') continue;
+    const child = node[key];
+    if (Array.isArray(child)) {
+      for (const item of child) {
+        if (item && typeof item.type === 'string') results.push(...findCallNodes(item, fnName));
+      }
+    } else if (child && typeof child.type === 'string') {
+      results.push(...findCallNodes(child, fnName));
+    }
+  }
+  return results;
 }
 
 module.exports = plugin;
