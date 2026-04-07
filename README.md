@@ -39,7 +39,7 @@ Pinmoli: Running INVITE test against sip:+15551234567@trunk.example.com...
 - **Runtime speech synthesis** -- espeak (offline) or Gemini TTS (high quality, Vertex AI)
 - **Real codec negotiation** -- PCMU, PCMA, G722, opus with automatic transcoding
 - **Failure analysis** -- pattern-matched diagnostics with actionable recovery steps
-- **Test persistence** -- save, load, list test configs (SQLite + FTS5)
+- **Test persistence** -- save, load, list test configs (SQLite preferred, JSON fallback when native bindings are unavailable)
 - **Per-session output** -- each run creates a directory with signaling logs, metadata, flow.json, audio WAVs
 - **Interactive multi-turn calls** -- start_call → send_audio → receive_audio → end_call, with live TUI indicators
 - **Snapshot replay** -- replay saved interactive calls from WAV files against the live endpoint, compare results
@@ -214,6 +214,50 @@ EOF
 
 Agent responses go to **stdout**, tool output and status go to **stderr**.
 
+### LiveKit Sample Workflows
+
+The `sample/` directory contains reference stderr logs for four real chatbot runs against a LiveKit SIP target: `oneshot`, `interactive-short`, `multiturn`, and `conversation`.
+
+Use the real chatbot in Docker and build the SIP URI from `.env`:
+
+```bash
+export SIP_URI="sip:${LIVEKIT_PHONE}@${LIVEKIT_SIP_ENDPOINT}"
+
+# oneshot
+docker compose exec -T pinmoli npx tsx src/cli-pipe.ts --provider google-vertex --model gemini-2.5-pro <<EOF
+Run a SIP INVITE test to ${SIP_URI} with sendDelay 5 and responseWaitTime 20
+EOF
+
+# interactive-short
+docker compose exec -T pinmoli npx tsx src/cli-pipe.ts --provider google-vertex --model gemini-2.5-pro <<EOF
+Start an interactive call to ${SIP_URI}
+Send the voice-hello audio sample on the active call
+Listen for the agent response for 20 seconds
+End the call
+EOF
+
+# multiturn
+docker compose exec -T pinmoli npx tsx src/cli-pipe.ts --provider google-vertex --model gemini-2.5-pro <<EOF
+Start an interactive call to ${SIP_URI}
+Send the voice-hello sample on the active call, then listen for 15 seconds for the agent response
+Generate Japanese speech using gemini TTS with text "こんにちは、新規のお客様です" and filename jp-greeting, then send it on the active call, then listen for 25 seconds
+Generate Japanese speech using gemini TTS with text "蜂蜜の商品について教えてください" and filename jp-honey-question, then send it on the active call, then listen for 25 seconds
+End the call
+EOF
+
+# conversation
+docker compose exec -T pinmoli npx tsx src/cli-pipe.ts --provider google-vertex --model gemini-2.5-pro <<EOF
+Start an interactive call to ${SIP_URI}, then listen for the agent greeting for 8 seconds
+Generate Japanese speech using gemini TTS saying "こんにちは。新規のお客様です。御社の蜂蜜の商品について教えてください。" then send it on the active call
+Listen for the agent response for 20 seconds
+Generate Japanese speech using gemini TTS saying "はちみつの種類はどのくらいありますか？値段も教えてください。" then send it on the active call
+Listen for the response for 20 seconds
+End the call
+EOF
+```
+
+The sample reference logs are `sample/oneshot-stderr.log`, `sample/interactive-short-stderr.log`, `sample/multiturn-stderr.log`, and `sample/conversation-stderr.log`.
+
 ### Replay Mode
 
 Re-execute a recorded session without the LLM. Compares the replay flow against the original:
@@ -298,7 +342,7 @@ The agent orchestrates the call through the four tools. Each tool appears as a c
 
  ▼ ⠦ receive_audio (2 events)                   ← turn 2: agent responds
    [INFO] +0.009s Listening for audio on port 54321 (15s)...
-   [INFO] +14.100s Received 740 RTP packets — saved: agent-response-5.wav
+   [INFO] +14.100s Received 740 RTP packets — saved: agent-response-4.wav
  ▶ ✓ receive_audio (2 events)
 
  ▼ ⠙ end_call (2 events)                        ← hang up
@@ -352,7 +396,7 @@ captures/20260323-140530-x7k2/
     flow.json                  ← structured event timeline
 ```
 
-File numbering follows the turn counter: sends get odd numbers (1, 3, 5...), receives get even numbers (2, 4, 6...).
+File numbering follows the turn counter, which increments on each send or receive. In the send-first pattern: sends get odd numbers (1, 3, 5...) and receives get even (2, 4, 6...). In the listen-first pattern the numbering reverses since the first receive is 1.
 
 ### Snapshot Replay
 
@@ -520,7 +564,9 @@ pinmoli [options]
 | `GOOGLE_APPLICATION_CREDENTIALS` | Path to GCP service account JSON (Vertex AI) |
 | `GOOGLE_CLOUD_PROJECT` | GCP project ID (default: `lifeandhalf-24122025`) |
 | `GOOGLE_CLOUD_LOCATION` | Vertex AI region (default: `us-central1`) |
-| `LIVEKIT_ENDPOINT` | LiveKit SIP endpoint for live tests |
+| `LIVEKIT_URL` | LiveKit Cloud URL used by live WebRTC and integration tests |
+| `LIVEKIT_SIP_ENDPOINT` | SIP host used to build live SIP URIs |
+| `LIVEKIT_PHONE` | E.164 destination number used in live SIP demos |
 | `PINMOLI_NO_CAPTURE` | Set to `1` to disable packet capture |
 
 ### Docker Compose
@@ -539,9 +585,10 @@ captures/{session-id}/
 │   ├── sip-log.txt                  # Every SIP message sent/received with ISO timestamps
 │   ├── metadata.json                # Config, duration, responses, codec, public IP
 │   ├── flow.json                    # Structured signaling flow (for replay comparison)
-│   ├── agent-greeting.wav           # Agent's greeting (if sendDelay > 0)
-│   ├── sent-audio.wav               # Outbound audio (transcoded to negotiated codec)
-│   └── agent-response.wav           # Agent's response audio
+│   ├── sent-audio-1.wav             # First outbound audio turn
+│   ├── agent-response-2.wav         # First inbound response window
+│   ├── sent-audio-3.wav             # Second outbound audio turn
+│   └── agent-response-4.wav         # Second inbound response window
 ├── sip-options-host-20260320-180000/
 │   ├── sip-log.txt
 │   ├── metadata.json
@@ -612,7 +659,7 @@ Generate speech with gemini saying "Hello, I need help with my account"
 
 ## Tools
 
-Pinmoli exposes 11 tools to the AI agent. You describe what you want and the agent picks the right tool.
+Pinmoli exposes 12 tools to the AI agent. You describe what you want and the agent picks the right tool.
 
 **One-shot tests:**
 
@@ -636,7 +683,8 @@ Pinmoli exposes 11 tools to the AI agent. You describe what you want and the age
 |------|---------|
 | `generate_audio` | Create audio samples (sine, DTMF, silence, TTS via espeak or Gemini). |
 | `analyze_failure` | Diagnose a failed test and suggest fixes. |
-| `save_test` | Save a test configuration by name (SQLite). |
+| `replay_session` | Replay a recorded session's tool calls without the LLM. |
+| `save_test` | Save a test configuration by name (SQLite preferred, JSON fallback). |
 | `load_test` | Load a saved test configuration by name. |
 | `list_tests` | List all saved test configurations. |
 
@@ -679,8 +727,9 @@ cd pinmoli
 docker compose build
 docker compose up -d
 
-# Run tests (must pass before submitting a PR)
-docker compose exec pinmoli npx vitest run
+# Run the default test suite (unit + integration; live tests are separate)
+docker compose exec pinmoli npm test
+docker compose exec pinmoli npm run test:live
 docker compose exec pinmoli npx tsc --noEmit
 docker compose exec pinmoli npm run lint
 ```

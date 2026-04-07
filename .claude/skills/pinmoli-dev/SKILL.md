@@ -44,7 +44,7 @@ Agent Runtime (src/agent/runtime.ts)
   - generate_audio -- ffmpeg/espeak audio generation
   - analyze_failure -- Pattern-matched diagnostics
   - replay_session -- Re-execute a recorded session's tool calls
-  - save/load/list_tests -- SQLite + FTS5
+  - save/load/list_tests -- lazy storage backend (SQLite preferred, JSON fallback)
   |
   v
 SIP Engine (src/sip/)              WebRTC Engine (src/webrtc/)
@@ -60,7 +60,7 @@ SIP Engine (src/sip/)              WebRTC Engine (src/webrtc/)
 Network (src/network/utils.ts) -- STUN NAT discovery, getLocalIp(), getPublicIp()
   |
   v
-Storage (src/storage/db.ts) -- SQLite + FTS5
+Storage (src/storage/db.ts) -- lazy storage backend (SQLite preferred, JSON fallback)
 ```
 
 ## File Structure
@@ -70,6 +70,7 @@ src/
 ├── cli.ts                    # Entry point, interactive TUI REPL
 ├── cli-pipe.ts               # Pipe mode (stdin→agent→stdout, stderr tee)
 ├── cli-replay.ts             # Replay mode (re-execute sessions without LLM)
+├── cli-replay-snapshot.ts    # Replay interactive call snapshots (WAV-driven)
 ├── agent/runtime.ts          # PinmoliAgent wraps pi-agent-core
 ├── ui/
 │   ├── tui.ts                # PinmoliTUI wraps pi-tui Terminal
@@ -96,7 +97,8 @@ src/
 │   ├── rtp-receiver.ts       # RTP/DTMF send/receive/save
 │   ├── codec.ts              # CODEC_TABLE, transcoding (PCMU<->PCMA), lookup
 │   ├── dtmf.ts               # RFC 4733 encode/decode, DtmfDetector
-│   └── audio.ts              # Audio sample resolution
+│   ├── audio.ts              # Audio sample resolution
+│   └── replay-snapshot.ts    # Snapshot replay engine + ScenarioManifest types
 ├── webrtc/
 │   ├── engine.ts             # WebRTC test orchestration (async generator)
 │   ├── whip.ts               # WHIP signaling client (RFC 9725)
@@ -109,7 +111,7 @@ src/
 │   ├── utils.ts              # STUN NAT discovery, getLocalIp(), getPublicIp()
 │   ├── session.ts            # Per-session directory, signaling log, metadata, manifest
 │   └── flow.ts               # Flow recording from engine events, FlowRecord, compareFlows()
-├── storage/db.ts             # SQLite + FTS5 persistence
+├── storage/db.ts             # Lazy storage init, SQLite preferred, JSON fallback
 ├── validation/schemas.ts     # TypeBox schemas
 └── commands/service-account.ts
 ```
@@ -205,7 +207,7 @@ const closeSocket = () => {
 };
 ```
 
-## Lint Rules (15 rules in eslint-plugin-pinmoli.cjs)
+## Lint Rules (`eslint-plugin-pinmoli.cjs`)
 
 ### Protocol Correctness
 - `no-unroutable-ip-fallback` -- 0.0.0.0/127.0.0.1 in SDP creates unroutable headers
@@ -227,6 +229,9 @@ const closeSocket = () => {
 - `no-shared-tmp-path` -- hardcoded /tmp/foo.ext collides under concurrency
 - `no-unabortable-spawn` -- spawn() without abort signal handling leaves orphans
 - `no-unrefed-timer-in-sip` -- setTimeout without .unref() keeps event loop alive
+- `no-stun-on-sip-socket` -- SIP sockets use `;rport` for NAT traversal; STUN is for RTP/media sockets only
+- `require-rport-in-via` -- Via headers must include `;rport` (RFC 3581) for reliable SIP NAT traversal
+- `no-unguarded-post-close-write` -- wrap post-call artifact writes in their own try/catch so disk errors do not misreport successful calls as failed
 
 ### UI Rules
 - `no-setinterval-in-ui` -- setInterval bypasses pi-tui's render pipeline
@@ -255,10 +260,10 @@ const closeSocket = () => {
 
 ```bash
 # ALL commands run inside Docker
-docker compose exec pinmoli npx vitest run              # all tests
+docker compose exec pinmoli npm test                    # unit + integration
 docker compose exec pinmoli npx vitest run test/unit/    # unit only
 docker compose exec pinmoli npx vitest run test/integration/  # integration
-docker compose exec pinmoli npx vitest run test/live/    # live (real endpoints)
+docker compose exec pinmoli npm run test:live            # live (real endpoints)
 docker compose exec pinmoli npx tsc --noEmit             # type-check
 docker compose exec pinmoli npm run lint                  # lint
 
