@@ -19,6 +19,12 @@ import { ALLOWED_TOOLS } from '../../src/tools/registry.js';
 
 const ROOT = resolve(new URL('.', import.meta.url).pathname, '../..');
 const DEV_SKILL_PATH = resolve(ROOT, '.claude/skills/pinmoli-dev/SKILL.md');
+const README_PATH = resolve(ROOT, 'README.md');
+const SKILLS_DOC_PATH = resolve(ROOT, 'SKILLS.md');
+const SKILLS_IMPLEMENTATION_PATH = resolve(ROOT, 'SKILLS-IMPLEMENTATION.md');
+const PERSONAL_SKILL_PATH = process.env.HOME
+  ? resolve(process.env.HOME, '.claude/skills/pinmoli/SKILL.md')
+  : '';
 
 describe('Skill-Code Sync', () => {
   const devSkill = readFileSync(DEV_SKILL_PATH, 'utf-8');
@@ -41,6 +47,63 @@ describe('Skill-Code Sync', () => {
           devSkill.includes(toolName),
           `Tool "${toolName}" missing from dev skill — add it to .claude/skills/pinmoli-dev/SKILL.md`
         ).toBe(true);
+      }
+    });
+  });
+
+  describe('User-facing docs stay in sync with the tool surface', () => {
+    const readme = readFileSync(README_PATH, 'utf-8');
+    const skillsDoc = readFileSync(SKILLS_DOC_PATH, 'utf-8');
+    const implementationDoc = readFileSync(SKILLS_IMPLEMENTATION_PATH, 'utf-8');
+    const personalSkill = PERSONAL_SKILL_PATH && existsSync(PERSONAL_SKILL_PATH)
+      ? readFileSync(PERSONAL_SKILL_PATH, 'utf-8')
+      : null;
+
+    it('README uses the current LiveKit env variable names', () => {
+      expect(readme).toContain('LIVEKIT_SIP_ENDPOINT');
+      expect(readme).toContain('LIVEKIT_PHONE');
+      expect(readme).not.toContain('LIVEKIT_ENDPOINT');
+    });
+
+    it('SKILLS.md claims 12 tools and lists every registered tool', () => {
+      expect(skillsDoc).toMatch(/\b12[\s-]+tool/i);
+      for (const toolName of ALLOWED_TOOLS) {
+        expect(skillsDoc.includes(toolName), `Tool "${toolName}" missing from SKILLS.md`).toBe(true);
+      }
+    });
+
+    it('SKILLS.md uses current WebRTC parameter names', () => {
+      expect(skillsDoc).toContain('whipEndpoint');
+      expect(skillsDoc).toContain('| `codec` |');
+      expect(skillsDoc).not.toContain('whipUrl');
+      const webrtcSection = skillsDoc.split('## `webrtc_test`')[1] ?? '';
+      const webrtcBeforeNextSection = webrtcSection.split('## `generate_audio`')[0] ?? '';
+      expect(webrtcBeforeNextSection).not.toContain('| `codecs` |');
+    });
+
+    it('SKILLS-IMPLEMENTATION.md reflects current tool count and schema library', () => {
+      expect(implementationDoc).toMatch(/\b12[\s-]+tool/i);
+      expect(implementationDoc).not.toMatch(/7\s+tools/i);
+      expect(implementationDoc).not.toMatch(/49\s+tests/i);
+      expect(implementationDoc).not.toMatch(/Zod\s+validation/i);
+      for (const toolName of ALLOWED_TOOLS) {
+        expect(
+          implementationDoc.includes(toolName),
+          `Tool "${toolName}" missing from SKILLS-IMPLEMENTATION.md`
+        ).toBe(true);
+      }
+    });
+
+    it('personal skill uses the current tool count and WebRTC parameters when installed', () => {
+      if (!personalSkill) return;
+      expect(personalSkill).toMatch(/\b12[\s-]+tool/i);
+      expect(personalSkill).toContain('whipEndpoint');
+      expect(personalSkill).toContain('LIVEKIT_SIP_ENDPOINT');
+      expect(personalSkill).toContain('LIVEKIT_PHONE');
+      expect(personalSkill).not.toContain('LIVEKIT_ENDPOINT');
+      expect(personalSkill).not.toContain('whipUrl');
+      for (const toolName of ALLOWED_TOOLS) {
+        expect(personalSkill.includes(toolName), `Tool "${toolName}" missing from personal skill`).toBe(true);
       }
     });
   });

@@ -11,8 +11,9 @@
  *     webrtc-whip-host-ts/    — per-test artifacts
  */
 
-import { mkdirSync, appendFileSync, writeFileSync } from 'fs';
-import { resolve, basename } from 'path';
+import { mkdirSync, appendFileSync, writeFileSync, accessSync, constants, existsSync } from 'fs';
+import os from 'os';
+import { resolve, basename, dirname } from 'path';
 
 export interface Session {
   /** Absolute path to session directory */
@@ -25,6 +26,38 @@ export interface Session {
   writeMetadata(meta: Record<string, unknown>): void;
   /** Resolve a filename within the session directory */
   file(name: string): string;
+}
+
+function canCreateOrWrite(dir: string): boolean {
+  const target = existsSync(dir) ? dir : dirname(dir);
+  try {
+    accessSync(target, constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve the base directory that stores captures/ session output.
+ *
+ * Priority:
+ * 1. PINMOLI_CAPTURES_DIR override
+ * 2. ./captures when the current checkout is writable
+ * 3. ~/.pinmoli/captures as a safe fallback for read-only checkouts/tests
+ */
+export function getCapturesBaseDir(): string {
+  if (process.env.PINMOLI_CAPTURES_DIR) {
+    return resolve(process.env.PINMOLI_CAPTURES_DIR);
+  }
+
+  // eslint-disable-next-line pinmoli/no-cwd-captures-default -- this IS the canonical helper
+  const repoCapturesDir = resolve(process.cwd(), 'captures');
+  if (canCreateOrWrite(repoCapturesDir)) {
+    return repoCapturesDir;
+  }
+
+  return resolve(os.homedir(), '.pinmoli', 'captures');
 }
 
 /**
@@ -45,7 +78,7 @@ export function initCliSession(): string {
   ].join('');
   const rand = Math.random().toString(36).slice(2, 6);
   const sessionId = `${stamp}-${rand}`;
-  const sessionRoot = resolve(process.cwd(), 'captures', sessionId);
+  const sessionRoot = resolve(getCapturesBaseDir(), sessionId);
   mkdirSync(sessionRoot, { recursive: true });
   process.env.PINMOLI_SESSION_DIR = sessionRoot;
   return sessionRoot;
@@ -56,7 +89,7 @@ export function initCliSession(): string {
  * Falls back to captures/ if no CLI session was initialized (e.g. tests).
  */
 export function getSessionRoot(): string {
-  return process.env.PINMOLI_SESSION_DIR || resolve(process.cwd(), 'captures');
+  return process.env.PINMOLI_SESSION_DIR || getCapturesBaseDir();
 }
 
 // ---- Session manifest (tool call recording for replay) ----

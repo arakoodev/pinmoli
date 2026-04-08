@@ -1,5 +1,25 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import { mkdtempSync, rmSync } from 'fs';
+import os from 'os';
+import path from 'path';
 import { registerAllTools, getAllTools, saveTestTool, loadTestTool, listTestsTool } from '../../src/tools/index.js';
+import { getStorageInfo, resetStorageForTests } from '../../src/storage/db.js';
+
+let tempDir = '';
+
+beforeEach(() => {
+  tempDir = mkdtempSync(path.join(os.tmpdir(), 'pinmoli-tools-'));
+  process.env.PINMOLI_CONFIG_DIR = tempDir;
+  process.env.PINMOLI_STORAGE_BACKEND = 'json';
+  resetStorageForTests();
+});
+
+afterEach(() => {
+  resetStorageForTests();
+  delete process.env.PINMOLI_CONFIG_DIR;
+  delete process.env.PINMOLI_STORAGE_BACKEND;
+  rmSync(tempDir, { recursive: true, force: true });
+});
 
   describe('Tool Registration', () => {
     it('registers all 12 tools', () => {
@@ -22,6 +42,14 @@ import { registerAllTools, getAllTools, saveTestTool, loadTestTool, listTestsToo
       expect(toolNames).toContain('receive_audio');
       expect(toolNames).toContain('end_call');
     });
+  it('registering tools does not initialize storage', () => {
+    registerAllTools();
+    expect(getStorageInfo()).toEqual({
+      initialized: false,
+      kind: 'json',
+      path: path.join(tempDir, 'pinmoli.json'),
+    });
+  });
   it('all tools have required properties', () => {
     registerAllTools();
     const tools = getAllTools();
@@ -51,7 +79,15 @@ describe('Save/Load/List Tools', () => {
     const result = await saveTestTool.execute('tc-1', { name, config: testConfig }, new AbortController().signal, () => {});
 
     expect(result.content[0].text).toContain(`Saved test "${name}"`);
-    expect(result.details).toEqual({ name, config: testConfig });
+    expect(result.details).toEqual({
+      name,
+      config: testConfig,
+      storage: {
+        initialized: true,
+        kind: 'json',
+        path: path.join(tempDir, 'pinmoli.json'),
+      },
+    });
   });
 
   it('save_test rejects duplicate names', async () => {

@@ -1,7 +1,7 @@
 /**
  * ESLint flat config for Pinmoli.
  *
- * Includes eslint-plugin-pinmoli (local) — 17 rules extracted from
+ * Includes eslint-plugin-pinmoli (local) — 18 rules extracted from
  * real bugs made by Claude Code in this codebase.
  */
 
@@ -81,6 +81,7 @@ export default [
       'pinmoli/no-shared-tmp-path': 'error',
       'pinmoli/no-unabortable-spawn': 'error',
       'pinmoli/no-unroutable-ip-fallback': 'error',
+      'pinmoli/no-cwd-captures-default': 'error',
       'pinmoli/no-random-sip-port': 'error',
       'pinmoli/no-unrefed-timer-in-sip': 'warn',
       'pinmoli/require-to-tag-in-dialog': 'error',

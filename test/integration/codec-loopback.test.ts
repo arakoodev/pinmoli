@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { spawnSync } from 'child_process';
 import dgram from 'dgram';
 import {
   sendRTPFromSocket,
@@ -16,7 +17,14 @@ import { transcodePcmuTo } from '../../src/sip/codec.js';
  * No external endpoints needed — tests the real code path end-to-end.
  */
 
-describe('Codec Pipeline Loopback', () => {
+function hasFfmpeg(): boolean {
+  const result = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' });
+  return !result.error && result.status === 0;
+}
+
+const describeCodecLoopback = hasFfmpeg() ? describe : describe.skip;
+
+describeCodecLoopback('Codec Pipeline Loopback', () => {
   it('PCMU: send and receive with correct PT=0', async () => {
     // Simulate SDP answer selecting PCMU
     const sdp = [

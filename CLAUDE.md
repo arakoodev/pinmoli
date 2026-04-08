@@ -28,8 +28,8 @@ docker compose exec pinmoli npx tsx src/cli.ts
 # Type-check
 docker compose exec pinmoli npx tsc --noEmit
 
-# Run all tests
-docker compose exec pinmoli npx vitest run
+# Run the default test suite (unit + integration)
+docker compose exec pinmoli npm test
 
 # Run unit tests only
 docker compose exec pinmoli npx vitest run test/unit/
@@ -38,7 +38,7 @@ docker compose exec pinmoli npx vitest run test/unit/
 docker compose exec pinmoli npx vitest run test/integration/
 
 # Run live tests (hits real LiveKit endpoint)
-docker compose exec pinmoli npx vitest run test/live/
+docker compose exec pinmoli npm run test:live
 
 # Lint
 docker compose exec pinmoli npm run lint
@@ -60,7 +60,7 @@ docker compose build && docker compose up -d
 - `cli-replay.ts` — Replay mode CLI: re-execute recorded sessions without LLM, compare flow.json
 - `agent/runtime.ts` — AI agent setup (pi-agent-core, multi-provider via pi-ai)
 - `ui/tui.ts` — Terminal UI (pi-tui)
-- `tools/` — 7 tool implementations (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests)
+- `tools/` — 12 tool implementations (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests, replay_session, start_call, send_audio, receive_audio, end_call)
 - `sip/engine.ts` — SIP test orchestration (async generator, yields events)
 - `sip/rtp-receiver.ts` — RTP packet build/parse/send/receive
 - `sip/audio.ts` — Audio sample resolution
@@ -85,7 +85,7 @@ docker compose build && docker compose up -d
 
 ## Lint Rules (`eslint-plugin-pinmoli`)
 
-Custom ESLint plugin at `eslint-plugin-pinmoli.cjs` with 17 rules extracted from real bugs:
+Custom ESLint plugin at `eslint-plugin-pinmoli.cjs` with 18 rules extracted from real bugs:
 
 - **`pinmoli/no-console-in-lib`** — `console.*` in library code corrupts the TUI display
 - **`pinmoli/no-process-exit`** — `process.exit()` skips SIP cleanup (no BYE, no socket close)

@@ -116,7 +116,7 @@ This design makes the engine usable outside the TUI too -- pipe events to NDJSON
 
 General-purpose agents (like OpenClaw) give the LLM access to bash, file I/O, and the full system. That power makes sense for a personal assistant. For a SIP testing tool, it's a liability -- you don't want an LLM accidentally `rm -rf`-ing your project while trying to debug a codec mismatch.
 
-Pinmoli's agent can only call 7 tools, all voice-testing related. The system prompt explicitly forbids filesystem access, and the tool registry enforces the allowlist at runtime. The LLM stays in its lane.
+Pinmoli's agent can only call 12 tools, all voice-testing related. The system prompt explicitly forbids filesystem access, and the tool registry enforces the allowlist at runtime. The LLM stays in its lane.
 
 ## Source Structure
 
@@ -301,8 +301,8 @@ All tests run inside Docker.
 # Start the container
 docker compose up -d
 
-# Run all tests
-docker compose exec pinmoli npx vitest run
+# Run the default test suite
+docker compose exec pinmoli npm test
 
 # Unit tests only (~1s)
 docker compose exec pinmoli npx vitest run test/unit/
@@ -311,12 +311,12 @@ docker compose exec pinmoli npx vitest run test/unit/
 docker compose exec pinmoli npx vitest run test/integration/
 
 # Live tests (hits real SIP endpoints, requires network)
-docker compose exec pinmoli npx vitest run test/live/
+docker compose exec pinmoli npm run test:live
 
 # Type-check
 docker compose exec pinmoli npx tsc --noEmit
 
-# Lint (15 custom rules)
+# Lint (18 custom rules)
 docker compose exec pinmoli npm run lint
 ```
 

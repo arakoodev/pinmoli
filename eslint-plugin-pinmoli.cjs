@@ -280,7 +280,65 @@ const plugin = {
     },
 
     /* ------------------------------------------------------------------ */
-    /* Rule 6 — pinmoli/no-random-sip-port                                */
+    /* Rule 6 — pinmoli/no-cwd-captures-default                           */
+    /*                                                                    */
+    /* resolve(process.cwd(), 'captures') makes session artifacts depend   */
+    /* on the current checkout being writable. In Docker this is fine,     */
+    /* but local tests/read-only worktrees fail before protocol logic      */
+    /* even runs. Use getCapturesBaseDir()/PINMOLI_CAPTURES_DIR or a       */
+    /* user-home fallback instead of hardcoding cwd-relative captures.     */
+    /* ------------------------------------------------------------------ */
+    'no-cwd-captures-default': {
+      meta: {
+        type: 'problem',
+        docs: {
+          description:
+            'Disallow process.cwd()/captures as the default artifact root.',
+        },
+        schema: [],
+        messages: {
+          repoLocal:
+            'process.cwd() + "captures" hardcodes artifacts into the current checkout. ' +
+            'Use getCapturesBaseDir(), PINMOLI_CAPTURES_DIR, or a writable fallback outside the repo.',
+        },
+      },
+      create(context) {
+        return {
+          CallExpression(node) {
+            const callee = node.callee;
+            const isPathCall = (
+              (callee.type === 'Identifier' && ['join', 'resolve'].includes(callee.name)) ||
+              (
+                callee.type === 'MemberExpression' &&
+                callee.property.type === 'Identifier' &&
+                ['join', 'resolve'].includes(callee.property.name)
+              )
+            );
+            if (!isPathCall || node.arguments.length < 2) return;
+
+            const firstArg = node.arguments[0];
+            const hasCapturesSegment = node.arguments.some(
+              (arg) => arg.type === 'Literal' && arg.value === 'captures',
+            );
+            if (!hasCapturesSegment) return;
+
+            if (
+              firstArg.type === 'CallExpression' &&
+              firstArg.callee.type === 'MemberExpression' &&
+              firstArg.callee.object.type === 'Identifier' &&
+              firstArg.callee.object.name === 'process' &&
+              firstArg.callee.property.type === 'Identifier' &&
+              firstArg.callee.property.name === 'cwd'
+            ) {
+              context.report({ node, messageId: 'repoLocal' });
+            }
+          },
+        };
+      },
+    },
+
+    /* ------------------------------------------------------------------ */
+    /* Rule 7 — pinmoli/no-random-sip-port                                */
     /*                                                                    */
     /* Math.random() for SIP port produces ports that don't match Docker  */
     /* port exposure. The Contact header advertises an unreachable port.  */
@@ -345,7 +403,7 @@ const plugin = {
     },
 
     /* ------------------------------------------------------------------ */
-    /* Rule 7 — pinmoli/no-unrefed-timer-in-sip                          */
+    /* Rule 8 — pinmoli/no-unrefed-timer-in-sip                          */
     /*                                                                    */
     /* setTimeout() keeps the Node.js event loop alive. In SIP code,     */
     /* this means the process hangs after Ctrl+C because the RTP receive */
@@ -407,7 +465,7 @@ const plugin = {
     },
 
     /* ------------------------------------------------------------------ */
-    /* Rule 8 — pinmoli/require-to-tag-in-dialog                          */
+    /* Rule 9 — pinmoli/require-to-tag-in-dialog                          */
     /*                                                                    */
     /* RFC 3261 Section 12.2.1.1: Requests within a dialog (ACK, BYE)    */
     /* MUST include the remote tag in the To header. Without it, some     */
@@ -448,7 +506,7 @@ const plugin = {
     },
 
     /* ------------------------------------------------------------------ */
-    /* Rule 9 — pinmoli/no-setinterval-in-ui                              */
+    /* Rule 10 — pinmoli/no-setinterval-in-ui                              */
     /*                                                                    */
     /* pi-tui provides Loader and CancellableLoader for animations with   */
     /* proper cursor management, synchronized output (CSI 2026), and      */
@@ -488,7 +546,7 @@ const plugin = {
     },
 
     /* ------------------------------------------------------------------ */
-    /* Rule 10 — pinmoli/no-hardcoded-payload-type                        */
+    /* Rule 11 — pinmoli/no-hardcoded-payload-type                        */
     /*                                                                    */
     /* Literal payload type numbers (0, 8, 9, 111) in RTP code bypass     */
     /* codec negotiation. When the code says payloadType: 0 or filters    */

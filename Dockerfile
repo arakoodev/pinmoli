@@ -27,7 +27,7 @@ RUN npm run lint
 RUN npm run build
 
 # Run unit + integration tests (live tests need network, run separately)
-RUN npx vitest run test/unit/ test/integration/
+RUN npm test
 
 # Expose SIP and RTP ports
 EXPOSE 5060/udp

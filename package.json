@@ -9,7 +9,9 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "vitest run",
+    "test": "vitest run test/unit/ test/integration/",
+    "test:all": "vitest run",
+    "test:live": "vitest run test/live/",
     "test:watch": "vitest",
     "lint": "ESLINT_USE_FLAT_CONFIG=true eslint src test",
     "lint:fix": "ESLINT_USE_FLAT_CONFIG=true eslint src test --fix"

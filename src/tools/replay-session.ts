@@ -7,8 +7,8 @@ import { Type } from '@sinclair/typebox';
 import { readFileSync, existsSync, readdirSync, mkdirSync, copyFileSync } from 'fs';
 import { resolve, basename } from 'path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
-import { getSessionRoot } from '../network/session.js';
-import { registerAllTools, getAllTools } from './index.js';
+import { getSessionRoot, getCapturesBaseDir } from '../network/session.js';
+import { getAllTools } from './index.js';
 import type { SessionManifest } from '../network/session.js';
 
 /**
@@ -22,7 +22,7 @@ function findSession(sessionId: string): string | null {
   }
 
   // Under captures/
-  const capturesDir = resolve(process.cwd(), 'captures');
+  const capturesDir = getCapturesBaseDir();
   const direct = resolve(capturesDir, sessionId);
   if (existsSync(resolve(direct, 'manifest.json'))) {
     return direct;

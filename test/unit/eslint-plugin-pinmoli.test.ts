@@ -190,7 +190,31 @@ describe('pinmoli/no-unroutable-ip-fallback', () => {
   });
 });
 
-// ---------- Rule 6: no-random-sip-port ----------
+// ---------- Rule 6: no-cwd-captures-default ----------
+
+describe('pinmoli/no-cwd-captures-default', () => {
+  it('flags cwd-relative captures defaults', () => {
+    ruleTester.run('no-cwd-captures-default', plugin.rules['no-cwd-captures-default'], {
+      valid: [
+        'const dir = getCapturesBaseDir();',
+        'const dir = resolve(os.homedir(), ".pinmoli", "captures");',
+        'const dir = resolve(process.cwd(), "logs");',
+      ],
+      invalid: [
+        {
+          code: 'const dir = resolve(process.cwd(), "captures");',
+          errors: [{ messageId: 'repoLocal' }],
+        },
+        {
+          code: 'const dir = path.join(process.cwd(), "captures", sessionId);',
+          errors: [{ messageId: 'repoLocal' }],
+        },
+      ],
+    });
+  });
+});
+
+// ---------- Rule 7: no-random-sip-port ----------
 
 describe('pinmoli/no-random-sip-port', () => {
   it('flags Math.random() in port assignments', () => {
@@ -219,7 +243,7 @@ describe('pinmoli/no-random-sip-port', () => {
   });
 });
 
-// ---------- Rule 7: no-unrefed-timer-in-sip ----------
+// ---------- Rule 8: no-unrefed-timer-in-sip ----------
 
 describe('pinmoli/no-unrefed-timer-in-sip', () => {
   it('flags setTimeout without .unref()', () => {
@@ -247,7 +271,7 @@ describe('pinmoli/no-unrefed-timer-in-sip', () => {
   });
 });
 
-// ---------- Rule 8: require-to-tag-in-dialog ----------
+// ---------- Rule 9: require-to-tag-in-dialog ----------
 
 describe('pinmoli/require-to-tag-in-dialog', () => {
   it('flags ACK/BYE builders without toTag parameter', () => {
@@ -283,7 +307,7 @@ describe('pinmoli/require-to-tag-in-dialog', () => {
   });
 });
 
-// ---------- Rule 9: no-setinterval-in-ui ----------
+// ---------- Rule 10: no-setinterval-in-ui ----------
 
 describe('pinmoli/no-setinterval-in-ui', () => {
   it('flags setInterval() in UI code', () => {
@@ -358,7 +382,7 @@ describe('pinmoli/require-cursor-hide-with-loader', () => {
   });
 });
 
-// ---------- Rule 10: no-hardcoded-payload-type ----------
+// ---------- Rule 11: no-hardcoded-payload-type ----------
 
 describe('pinmoli/no-hardcoded-payload-type', () => {
   it('flags literal payload types in RTP code', () => {

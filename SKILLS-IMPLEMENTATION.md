@@ -52,32 +52,20 @@
 - Bidirectional call flow (send audio, wait for response, hangup)
 - LiveKit integration (SIP and WebRTC)
 
-### 7 Tools Available
+### 12 Tools Available
 
 1. **sip_test** - Execute SIP tests with speech and DTMF
-   - OPTIONS, INVITE, REGISTER methods
-   - Custom audio samples
-   - Configurable response wait time (0-60s)
-   - Bidirectional conversation support
-   - DTMF send/receive via `dtmfDigits` parameter (RFC 4733)
-
 2. **webrtc_test** - Execute WebRTC voice agent tests
-   - WHIP signaling (POST offer → answer)
-   - ICE/DTLS/SRTP negotiation via werift (pure TypeScript)
-   - Bidirectional audio (send samples, receive agent response as WAV)
-   - DTMF send/receive via `dtmfDigits` parameter
-   - Bearer token auth for LiveKit, Cloudflare, etc.
-
 3. **generate_audio** - Create custom audio at runtime
-   - Speech synthesis (espeak)
-   - Sine wave generation
-   - Real dual-tone DTMF (ITU-T Q.23 frequency pairs)
-   - Silence
-
 4. **analyze_failure** - Diagnose test failures
-5. **save_test** - Save test configurations to SQLite (catches duplicate names)
-6. **load_test** - Load saved tests from SQLite (returns config or "not found")
-7. **list_tests** - List all saved tests from SQLite (name + timestamp)
+5. **save_test** - Save test configurations
+6. **load_test** - Load saved tests
+7. **list_tests** - List saved tests
+8. **replay_session** - Replay a prior manifest-driven session
+9. **start_call** - Start a multi-turn SIP dialog
+10. **send_audio** - Send audio or DTMF on an active call
+11. **receive_audio** - Capture agent audio on an active call
+12. **end_call** - Hang up and clean up an active call
 
 ### Audio Capabilities
 
@@ -94,9 +82,9 @@
 - All output as PCMU @ 8kHz mono
 
 **Audio File Capture:**
-- Both engines save inbound + outbound audio as WAV to `captures/audio/`
-- SIP: agent-greeting, agent-response, sent-audio (transcoded to negotiated codec)
-- WebRTC: webrtc-greeting, webrtc-response, webrtc-sent
+- Both engines save inbound + outbound audio under per-session directories in `captures/{session-id}/`
+- SIP interactive calls use numbered turn artifacts such as `sent-audio-1.wav` and `agent-response-2.wav`
+- WebRTC sessions save signaling logs plus per-run WAV artifacts alongside `metadata.json` and `flow.json`
 - WebRTC opus decoded via OGG Opus container (RFC 7845) + ffmpeg
 - WebRTC PCMU saved as mu-law WAV directly
 - SIP graceful degradation: if outbound codec encode unsupported (e.g., opus), warns and continues receive-only
@@ -203,7 +191,7 @@ When user says:
 
 **What AI Learns:**
 - How to install and run Pinmoli
-- The 7 tools (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests)
+- The 12 tools (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests, replay_session, start_call, send_audio, receive_audio, end_call)
 - Common workflows (test endpoint, make call, debug failure, save config)
 - Troubleshooting (agent not calling tools, socket errors, timeouts)
 - Best practices (when to use, good test requests, naming conventions)
@@ -219,9 +207,9 @@ Automatically loaded when working in the project root directory
 Not user-invocable (background context only)
 
 **What AI Learns:**
-- Architecture patterns (async generators, Zod validation, errors as data)
-- Code conventions (5 skills only, domain restrictions, socket cleanup)
-- Testing philosophy (49 tests, real LiveKit, no mocks)
+- Architecture patterns (async generators, TypeBox validation, errors as data)
+- Code conventions (12-tool allowlist, domain restrictions, socket cleanup)
+- Testing philosophy (unit + integration by default, live tests separated)
 - Common mistakes to avoid (from AGENTS.md)
 - Development workflows (adding codecs, fixing bugs, adding features)
 - File structure and dependencies
@@ -302,29 +290,25 @@ gemini "Test sip:example.com with OPTIONS"
 ### Personal Skill Teaches:
 
 1. **Installation**
-   - npm install, build, run
-   - Configuration (~/.pinmoli/config.json)
-   - Environment variables (ANTHROPIC_API_KEY)
+   - Docker-first runtime (`src/cli.ts`, `src/cli-pipe.ts`, `src/cli-replay.ts`)
+   - Live-test env vars (`LIVEKIT_URL`, `LIVEKIT_SIP_ENDPOINT`, `LIVEKIT_PHONE`)
+   - Lint/test/type-check commands (`npm test`, `npm run test:live`, `npm run lint`, `tsc --noEmit`)
 
-2. **The 7 Tools**
-   - sip_test: Execute SIP tests (with DTMF)
-   - webrtc_test: Execute WebRTC tests via WHIP
-   - generate_audio: Generate custom audio
-   - analyze_failure: Analyze failures
-   - save_test: Save configurations
-   - load_test: Load configurations
-   - list_tests: List all tests
+2. **The 12 Tools**
+   - sip_test, webrtc_test, generate_audio, analyze_failure
+   - save_test, load_test, list_tests, replay_session
+   - start_call, send_audio, receive_audio, end_call
 
 3. **Common Workflows**
    - Test endpoint: `test sip:example.com with OPTIONS`
-   - Make call: `make an INVITE call using opus codec`
+   - Make call: `start an interactive call, send audio, listen, end call`
    - Debug failure: `analyze the failure`
    - Save config: `save this test as "name"`
 
-4. **Architecture**
-   - TUI → Agent → Skills → SIP → Storage
-   - Event streaming (circular buffer, max 1000)
-   - Real-time updates
+4. **Storage and Artifacts**
+   - `~/.pinmoli/` storage with SQLite preferred and JSON fallback
+   - `captures/{session-id}/` layout with `manifest.json`, `flow.json`, and numbered WAV artifacts
+   - Replayable session output via `replay_session` and CLI replay tools
 
 5. **Troubleshooting**
    - Agent not calling tools
@@ -353,7 +337,7 @@ gemini "Test sip:example.com with OPTIONS"
    - Start minimal (YAGNI)
    - Use TypeBox for validation
    - Guard resource cleanup
-   - 7 tools only (no dynamic registration)
+   - 12 tools only (no dynamic registration)
 
 3. **File Structure**
    - src/ organization (sip/, webrtc/, tools/, ui/, storage/)
@@ -361,7 +345,7 @@ gemini "Test sip:example.com with OPTIONS"
    - Documentation files
 
 4. **Testing**
-   - 126+ unit tests, 57+ integration tests
+   - Unit and integration suites by default, live suites separately
    - Real LiveKit endpoints (SIP and WebRTC)
    - No mocks for network testing
 

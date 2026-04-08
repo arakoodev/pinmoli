@@ -1,6 +1,6 @@
 # Pinmoli Tools Reference
 
-Pinmoli provides 7 tools to the AI agent for SIP/WebRTC testing. You interact with these through natural language -- the agent selects and invokes the appropriate tool based on your request.
+Pinmoli provides 12 tools to the AI agent for SIP/WebRTC testing. You interact with these through natural language -- the agent selects and invokes the appropriate tool based on your request.
 
 ## `sip_test`
 
@@ -70,9 +70,9 @@ Execute a WebRTC voice agent test via WHIP signaling.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `whipUrl` | string | yes | -- | WHIP endpoint URL (must be HTTPS, or HTTP for local dev) |
+| `whipEndpoint` | string | yes | -- | WHIP endpoint URL (must be HTTPS, or HTTP for local dev) |
 | `bearerToken` | string | no | -- | Bearer token for authenticated endpoints (LiveKit, Cloudflare) |
-| `codecs` | string[] | no | `["opus"]` | Codecs to offer: `opus`, `PCMU`, `PCMA`, `G722` |
+| `codec` | enum | no | `opus` | Preferred codec: `opus` or `PCMU` |
 | `audioSample` | string | no | `voice-hello` | Audio to send (same samples as `sip_test`) |
 | `sendDelay` | number | no | `0` | Seconds to listen before sending audio (0-60) |
 | `responseWaitTime` | number | no | `10` | Seconds to wait for agent audio response (0-60) |
@@ -190,7 +190,7 @@ Analyze a failed SIP test and provide diagnostic insights.
 
 ## `save_test`
 
-Save a test configuration to SQLite (`~/.pinmoli/pinmoli.db`).
+Save a test configuration to Pinmoli storage under `~/.pinmoli/`. SQLite is preferred; JSON fallback is used when the native SQLite binding is unavailable.
 
 ### Parameters
 
@@ -201,9 +201,9 @@ Save a test configuration to SQLite (`~/.pinmoli/pinmoli.db`).
 
 ### Behavior
 
-- Stores the full config as JSON in SQLite with FTS5 indexing
+- Stores the full config in the active storage backend (`pinmoli.db` for SQLite, `pinmoli.json` for JSON fallback)
 - Returns an error if a test with the same name already exists (UNIQUE constraint)
-- Data persists across container restarts at `~/.pinmoli/pinmoli.db`
+- Data persists across container restarts if `~/.pinmoli/` is mounted or otherwise preserved
 
 ### Examples
 
@@ -241,7 +241,7 @@ Load a previously saved test configuration by name.
 
 ## `list_tests`
 
-List all saved test configurations from SQLite.
+List all saved test configurations from the active Pinmoli storage backend.
 
 ### Parameters
 
@@ -260,6 +260,33 @@ None.
 "What tests do I have?"
 "List my test configurations"
 ```
+
+---
+
+## `replay_session`
+
+Replay a previously recorded session from `captures/<session-id>/manifest.json` without the LLM.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sessionId` | string | yes | Full session directory name or a unique suffix/substring |
+
+---
+
+## Interactive Call Tools
+
+These 4 tools keep a SIP dialog open across multiple tool calls:
+
+| Tool | Purpose |
+|------|---------|
+| `start_call` | Start an INVITE dialog and return a `callId` |
+| `send_audio` | Send a generated/built-in sample or DTMF on an active call |
+| `receive_audio` | Listen on an active call for N seconds and save WAV output |
+| `end_call` | Send BYE, close sockets, and remove the active call from the store |
+
+Use them when the user wants a multi-turn back-and-forth conversation instead of a one-shot `sip_test`.
 
 ---
 
@@ -341,9 +368,9 @@ Each test run creates a per-session directory under `captures/{session-id}/` con
 | `sip-log.txt` / `signaling-log.txt` | Every SIP/WHIP message sent/received with ISO timestamps |
 | `metadata.json` | Config, duration, responses, codec, public IP, success/failure |
 | `flow.json` | Structured signaling flow (for replay comparison) |
-| `agent-greeting.wav` | Agent's greeting audio (SIP, when `sendDelay > 0`) |
-| `sent-audio.wav` | Outbound audio (transcoded to negotiated codec) |
-| `agent-response.wav` | Agent's response audio |
+| `audio-samples/*.wav` | Generated TTS/audio samples created during the session |
+| `sent-audio-<n>.wav` | Outbound audio for each send step in an interactive call |
+| `agent-response-<n>.wav` | Inbound audio for each receive step or response window |
 
 The `manifest.json` at the session root records every tool call the LLM made, enabling replay mode.
 

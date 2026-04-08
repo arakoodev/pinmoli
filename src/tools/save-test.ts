@@ -6,7 +6,7 @@
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import { TestConfigSchema, type TestConfig } from '../validation/schemas.js';
-import { saveCollection } from '../storage/db.js';
+import { saveCollection, getStorageInfo } from '../storage/db.js';
 
 export const saveTestTool: AgentTool = {
   name: 'save_test',
@@ -38,12 +38,13 @@ export const saveTestTool: AgentTool = {
       throw err;
     }
 
+    const storage = getStorageInfo();
     return {
       content: [{
         type: 'text',
-        text: `Saved test "${name}" to ~/.pinmoli/pinmoli.db`
+        text: `Saved test "${name}" to ${storage.path}`
       }],
-      details: { name, config }
+      details: { name, config, storage }
     };
   }
 };
