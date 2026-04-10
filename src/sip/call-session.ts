@@ -87,7 +87,12 @@ export async function openDialog(
       });
     }
     if (!preflight.sipHostResolved) {
-      throw new Error(`DNS resolution failed for ${host}`);
+      onEvent({
+        type: 'info',
+        timestamp: Date.now(),
+        message: `[preflight] WARNING: DNS resolution failed for ${host} — INVITE will likely fail`,
+        severity: 'warning',
+      });
     }
   }
 

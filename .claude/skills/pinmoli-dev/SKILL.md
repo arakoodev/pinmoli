@@ -104,6 +104,8 @@ src/
 │   ├── engine.ts             # WebRTC test orchestration (async generator)
 │   ├── whip.ts               # WHIP signaling client (RFC 9725)
 │   └── audio-frames.ts       # PCM16 frame chunking, OGG Opus decode, WAV save
+├── livekit/
+│   └── diagnostics.ts        # LiveKit SIP trunk/room/participant diagnostics
 ├── google/
 │   ├── auth.ts               # Google Cloud OAuth2 via service account JWT
 │   ├── gemini-rest.ts        # Vertex AI generateContent REST client
