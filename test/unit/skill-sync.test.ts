@@ -32,13 +32,13 @@ describe('Skill-Code Sync', () => {
   // ----- Tool registry -----
 
   describe('Tool registry matches skill documentation', () => {
-    it('ALLOWED_TOOLS has exactly 12 entries', () => {
-      expect(ALLOWED_TOOLS).toHaveLength(12);
+    it('ALLOWED_TOOLS has exactly 13 entries', () => {
+      expect(ALLOWED_TOOLS).toHaveLength(13);
     });
 
-    it('dev skill claims 12 tools', () => {
-      // Matches "12 tools", "12-tool", "Exactly 12 tools", etc.
-      expect(devSkill).toMatch(/\b12[\s-]+tool/i);
+    it('dev skill claims 13 tools', () => {
+      // Matches "13 tools", "13-tool", "Exactly 13 tools", etc.
+      expect(devSkill).toMatch(/\b13[\s-]+tool/i);
     });
 
     it('all registered tool names appear in dev skill', () => {
@@ -65,8 +65,8 @@ describe('Skill-Code Sync', () => {
       expect(readme).not.toContain('LIVEKIT_ENDPOINT');
     });
 
-    it('SKILLS.md claims 12 tools and lists every registered tool', () => {
-      expect(skillsDoc).toMatch(/\b12[\s-]+tool/i);
+    it('SKILLS.md claims 13 tools and lists every registered tool', () => {
+      expect(skillsDoc).toMatch(/\b13[\s-]+tool/i);
       for (const toolName of ALLOWED_TOOLS) {
         expect(skillsDoc.includes(toolName), `Tool "${toolName}" missing from SKILLS.md`).toBe(true);
       }
@@ -82,7 +82,7 @@ describe('Skill-Code Sync', () => {
     });
 
     it('SKILLS-IMPLEMENTATION.md reflects current tool count and schema library', () => {
-      expect(implementationDoc).toMatch(/\b12[\s-]+tool/i);
+      expect(implementationDoc).toMatch(/\b13[\s-]+tool/i);
       expect(implementationDoc).not.toMatch(/7\s+tools/i);
       expect(implementationDoc).not.toMatch(/49\s+tests/i);
       expect(implementationDoc).not.toMatch(/Zod\s+validation/i);

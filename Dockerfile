@@ -1,7 +1,7 @@
 FROM node:20-alpine
 
 # Install ffmpeg and espeak for audio generation
-RUN apk add --no-cache ffmpeg espeak tini tcpdump
+RUN apk add --no-cache ffmpeg espeak tini tcpdump pulseaudio-utils
 
 WORKDIR /app
 

@@ -14,7 +14,8 @@
     "test:live": "vitest run test/live/",
     "test:watch": "vitest",
     "lint": "ESLINT_USE_FLAT_CONFIG=true eslint src test",
-    "lint:fix": "ESLINT_USE_FLAT_CONFIG=true eslint src test --fix"
+    "lint:fix": "ESLINT_USE_FLAT_CONFIG=true eslint src test --fix",
+    "build:play": "esbuild src/cli-play.ts --bundle --platform=node --target=node20 --format=esm --outfile=bin/pinmoli-play.mjs --banner:js='#!/usr/bin/env node' --external:koffi --external:better-sqlite3"
   },
   "dependencies": {
     "@mariozechner/pi-agent-core": "^0.54.0",

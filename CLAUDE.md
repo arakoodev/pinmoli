@@ -60,7 +60,7 @@ docker compose build && docker compose up -d
 - `cli-replay.ts` — Replay mode CLI: re-execute recorded sessions without LLM, compare flow.json
 - `agent/runtime.ts` — AI agent setup (pi-agent-core, multi-provider via pi-ai)
 - `ui/tui.ts` — Terminal UI (pi-tui)
-- `tools/` — 12 tool implementations (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests, replay_session, start_call, send_audio, receive_audio, end_call)
+- `tools/` — 13 tool implementations (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests, replay_session, start_call, send_audio, receive_audio, end_call, play_audio)
 - `sip/engine.ts` — SIP test orchestration (async generator, yields events)
 - `sip/rtp-receiver.ts` — RTP packet build/parse/send/receive
 - `sip/audio.ts` — Audio sample resolution

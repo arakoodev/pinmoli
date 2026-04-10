@@ -225,19 +225,21 @@ async function generateSpeech(output: string, text: string, codec: CodecInfo, tt
     if (!isVertexConfigured()) {
       throw new Error('Gemini TTS requires Vertex AI. Configure with --service-account or GOOGLE_APPLICATION_CREDENTIALS.');
     }
-    const { synthesizeSpeech, wrapMulawWav } = await import('../google/tts.js');
-    const samples = await synthesizeSpeech(text, voice ? { voice } : undefined);
+    const { synthesizeSpeech, wrapAudioAsWav } = await import('../google/tts.js');
 
-    if (codec.name === 'PCMU') {
-      // Native MULAW — zero transcoding, direct WAV save
-      writeFileSync(output, wrapMulawWav(samples));
-      return true;
-    }
+    // Gemini TTS returns audio/L16 (PCM signed 16-bit, typically 24kHz mono).
+    // We MUST wrap it in a WAV that matches the actual sample rate/encoding,
+    // then transcode to the target SIP codec via ffmpeg. NEVER assume the
+    // bytes are already in the target format — that produces garbled noise.
+    const result = await synthesizeSpeech(text, voice ? { voice } : undefined);
 
-    // Other codecs: save temp MULAW WAV, ffmpeg convert to target
+    // Wrap the actual response (typically PCM16 24kHz) in a proper WAV
     const tmpFile = `/tmp/gemini-tts-${Date.now()}-${process.pid}.wav`;
-    writeFileSync(tmpFile, wrapMulawWav(samples));
+    writeFileSync(tmpFile, wrapAudioAsWav(result));
+
     try {
+      // Always transcode through ffmpeg — handles sample rate conversion
+      // (24kHz → 8kHz/16kHz) and codec conversion (PCM16 → mu-law/A-law/G722)
       return await new Promise((resolve) => {
         const ffmpeg = spawn('ffmpeg', [
           '-i', tmpFile,
@@ -246,7 +248,7 @@ async function generateSpeech(output: string, text: string, codec: CodecInfo, tt
         ]);
         ffmpeg.on('close', (code) => resolve(code === 0));
         ffmpeg.on('error', () => resolve(false));
-        const timer = setTimeout(() => { ffmpeg.kill(); resolve(false); }, 10000);
+        const timer = setTimeout(() => { ffmpeg.kill(); resolve(false); }, 15000);
         timer.unref();
       });
     } finally {

@@ -1,6 +1,6 @@
 # Pinmoli Tools Reference
 
-Pinmoli provides 12 tools to the AI agent for SIP/WebRTC testing. You interact with these through natural language -- the agent selects and invokes the appropriate tool based on your request.
+Pinmoli provides 13 tools to the AI agent for SIP/WebRTC testing. You interact with these through natural language -- the agent selects and invokes the appropriate tool based on your request.
 
 ## `sip_test`
 
@@ -287,6 +287,30 @@ These 4 tools keep a SIP dialog open across multiple tool calls:
 | `end_call` | Send BYE, close sockets, and remove the active call from the store |
 
 Use them when the user wants a multi-turn back-and-forth conversation instead of a one-shot `sip_test`.
+
+---
+
+## `play_audio`
+
+Play a WAV audio file through the speaker via PulseAudio.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `filePath` | string | yes | Audio sample name (e.g. `voice-hello`), session-generated filename, or absolute path from `receive_audio` result |
+
+### Examples
+
+```
+"Play the agent's response"
+"Play the voice-hello sample"
+"Play /app/captures/.../agent-response-2.wav"
+```
+
+### Requirements
+
+Requires PulseAudio. On WSL2: WSLg provides the PulseAudio socket at `/mnt/wslg/PulseServer`. The `docker-compose.yml` mounts this and sets `PULSE_SERVER` automatically.
 
 ---
 

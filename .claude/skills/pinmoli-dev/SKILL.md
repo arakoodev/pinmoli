@@ -14,7 +14,7 @@ This skill provides context for AI assistants working on the Pinmoli codebase.
 A specialized, domain-restricted AI agent for SIP/WebRTC testing. Think "Postman with Agent Mode" but exclusively for voice protocols. Multi-provider LLM support (Anthropic, OpenAI, Gemini, Groq, OpenRouter).
 
 **Key Constraints:**
-- Exactly 12 tools (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests, replay_session, start_call, send_audio, receive_audio, end_call)
+- Exactly 13 tools (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests, replay_session, start_call, send_audio, receive_audio, end_call, play_audio)
 - Domain-restricted to SIP/WebRTC testing only
 - No file editing, no bash commands -- voice protocol testing only
 - Built on pi-mono libraries (pi-agent-core, pi-ai, pi-tui)
@@ -34,13 +34,14 @@ Agent Runtime (src/agent/runtime.ts)
   - System prompt (domain restricted)
   |
   v
-12 Tools (src/tools/)
+13 Tools (src/tools/)
   - sip_test      -- SIP INVITE/OPTIONS/REGISTER (one-shot)
   - webrtc_test   -- WebRTC via WHIP (RFC 9725)
   - start_call    -- Interactive SIP call (INVITE → 200 OK → ACK)
   - send_audio    -- Send audio on active call
   - receive_audio -- Listen for audio on active call
   - end_call      -- Hang up active call (BYE)
+  - play_audio    -- Play WAV through speaker (ffmpeg → paplay/PulseAudio)
   - generate_audio -- ffmpeg/espeak audio generation
   - analyze_failure -- Pattern-matched diagnostics
   - replay_session -- Re-execute a recorded session's tool calls

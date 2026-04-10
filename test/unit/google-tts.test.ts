@@ -21,14 +21,14 @@ describe('Gemini TTS', () => {
     delete process.env.GOOGLE_CLOUD_LOCATION;
   });
 
-  it('synthesizeSpeech calls Vertex AI and returns audio buffer', async () => {
-    const fakeAudio = Buffer.from([0x80, 0x7F, 0x80, 0x7F]); // fake MULAW samples
+  it('synthesizeSpeech parses PCM L16 24kHz response from real Gemini TTS', async () => {
+    const fakeAudio = Buffer.from([0x12, 0x34, 0x56, 0x78]); // fake PCM16 samples
     const fakeResponse = {
       candidates: [{
         content: {
           parts: [{
             inlineData: {
-              mimeType: 'audio/basic',
+              mimeType: 'audio/L16;codec=pcm;rate=24000',
               data: fakeAudio.toString('base64'),
             },
           }],
@@ -45,15 +45,18 @@ describe('Gemini TTS', () => {
     const { synthesizeSpeech } = await import('../../src/google/tts.js');
     const result = await synthesizeSpeech('Hello world');
 
-    expect(result).toBeInstanceOf(Buffer);
-    expect(result.length).toBe(4);
-    expect(result[0]).toBe(0x80);
+    expect(result.samples).toBeInstanceOf(Buffer);
+    expect(result.samples.length).toBe(4);
+    expect(result.samples[0]).toBe(0x12);
+    expect(result.sampleRate).toBe(24000);
+    expect(result.encoding).toBe('pcm16');
+    expect(result.mimeType).toBe('audio/L16;codec=pcm;rate=24000');
 
     // Verify the API was called with correct URL pattern
     const [url, options] = mockFetch.mock.calls[0];
     expect(url).toContain('us-central1-aiplatform.googleapis.com');
     expect(url).toContain('test-project');
-    expect(url).toContain('gemini-2.5-flash-tts');
+    expect(url).toContain('gemini-2.5-flash-preview-tts');
     expect(url).toContain(':generateContent');
 
     // Verify request body
@@ -63,12 +66,42 @@ describe('Gemini TTS', () => {
     expect(body.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe('Kore');
   });
 
-  it('synthesizeSpeech accepts custom model and voice', async () => {
-    const fakeAudio = Buffer.from([0x00]);
+  it('synthesizeSpeech detects mu-law from audio/basic mime type', async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
-        candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/basic', data: fakeAudio.toString('base64') } }] } }],
+        candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/basic', data: Buffer.from([0x80]).toString('base64') } }] } }],
+      }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const { synthesizeSpeech } = await import('../../src/google/tts.js');
+    const result = await synthesizeSpeech('Hello');
+    expect(result.encoding).toBe('mulaw');
+    expect(result.sampleRate).toBe(8000);
+  });
+
+  it('synthesizeSpeech parses custom rate from mime type', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;codec=pcm;rate=16000', data: Buffer.from([0x00, 0x01]).toString('base64') } }] } }],
+      }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const { synthesizeSpeech } = await import('../../src/google/tts.js');
+    const result = await synthesizeSpeech('Hello');
+    expect(result.sampleRate).toBe(16000);
+    expect(result.encoding).toBe('pcm16');
+  });
+
+  it('synthesizeSpeech accepts custom model and voice', async () => {
+    const fakeAudio = Buffer.from([0x00, 0x01]);
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;codec=pcm;rate=24000', data: fakeAudio.toString('base64') } }] } }],
       }),
     });
     globalThis.fetch = mockFetch;
@@ -150,5 +183,60 @@ describe('wrapMulawWav', () => {
     const wav = wrapMulawWav(Buffer.from([0x80]), 16000);
     expect(wav.readUInt32LE(24)).toBe(16000);
     expect(wav.readUInt32LE(28)).toBe(16000);
+  });
+});
+
+describe('wrapPcm16Wav', () => {
+  it('produces valid WAV header for PCM16 24kHz samples', async () => {
+    const { wrapPcm16Wav } = await import('../../src/google/tts.js');
+    const samples = Buffer.from([0x12, 0x34, 0x56, 0x78]); // 2 PCM16 samples
+    const wav = wrapPcm16Wav(samples);
+
+    expect(wav.length).toBe(44 + 4);
+    expect(wav.toString('ascii', 0, 4)).toBe('RIFF');
+    expect(wav.toString('ascii', 8, 12)).toBe('WAVE');
+    expect(wav.readUInt16LE(20)).toBe(1);     // PCM format code
+    expect(wav.readUInt16LE(22)).toBe(1);     // mono
+    expect(wav.readUInt32LE(24)).toBe(24000); // default sample rate
+    expect(wav.readUInt32LE(28)).toBe(48000); // byte rate (24000 × 2)
+    expect(wav.readUInt16LE(32)).toBe(2);     // block align (16-bit mono)
+    expect(wav.readUInt16LE(34)).toBe(16);    // bits per sample
+    expect(wav.readUInt32LE(40)).toBe(4);     // data size
+
+    expect(wav[44]).toBe(0x12);
+    expect(wav[47]).toBe(0x78);
+  });
+
+  it('accepts custom sample rate', async () => {
+    const { wrapPcm16Wav } = await import('../../src/google/tts.js');
+    const wav = wrapPcm16Wav(Buffer.from([0x00, 0x01]), 16000);
+    expect(wav.readUInt32LE(24)).toBe(16000);
+    expect(wav.readUInt32LE(28)).toBe(32000); // 16000 × 2 bytes/sample
+  });
+});
+
+describe('wrapAudioAsWav', () => {
+  it('wraps PCM16 result as PCM WAV', async () => {
+    const { wrapAudioAsWav } = await import('../../src/google/tts.js');
+    const wav = wrapAudioAsWav({
+      samples: Buffer.from([0x12, 0x34]),
+      sampleRate: 24000,
+      encoding: 'pcm16',
+      mimeType: 'audio/L16;codec=pcm;rate=24000',
+    });
+    expect(wav.readUInt16LE(20)).toBe(1);  // PCM format
+    expect(wav.readUInt32LE(24)).toBe(24000);
+  });
+
+  it('wraps mu-law result as mu-law WAV', async () => {
+    const { wrapAudioAsWav } = await import('../../src/google/tts.js');
+    const wav = wrapAudioAsWav({
+      samples: Buffer.from([0x80]),
+      sampleRate: 8000,
+      encoding: 'mulaw',
+      mimeType: 'audio/basic',
+    });
+    expect(wav.readUInt16LE(20)).toBe(7);  // mu-law format
+    expect(wav.readUInt32LE(24)).toBe(8000);
   });
 });

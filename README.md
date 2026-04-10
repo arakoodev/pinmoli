@@ -659,7 +659,7 @@ Generate speech with gemini saying "Hello, I need help with my account"
 
 ## Tools
 
-Pinmoli exposes 12 tools to the AI agent. You describe what you want and the agent picks the right tool.
+Pinmoli exposes 13 tools to the AI agent. You describe what you want and the agent picks the right tool.
 
 **One-shot tests:**
 
@@ -683,6 +683,7 @@ Pinmoli exposes 12 tools to the AI agent. You describe what you want and the age
 |------|---------|
 | `generate_audio` | Create audio samples (sine, DTMF, silence, TTS via espeak or Gemini). |
 | `analyze_failure` | Diagnose a failed test and suggest fixes. |
+| `play_audio` | Play a WAV file through the speaker (ffmpeg → PulseAudio). |
 | `replay_session` | Replay a recorded session's tool calls without the LLM. |
 | `save_test` | Save a test configuration by name (SQLite preferred, JSON fallback). |
 | `load_test` | Load a saved test configuration by name. |

@@ -52,7 +52,7 @@
 - Bidirectional call flow (send audio, wait for response, hangup)
 - LiveKit integration (SIP and WebRTC)
 
-### 12 Tools Available
+### 13 Tools Available
 
 1. **sip_test** - Execute SIP tests with speech and DTMF
 2. **webrtc_test** - Execute WebRTC voice agent tests
@@ -191,7 +191,7 @@ When user says:
 
 **What AI Learns:**
 - How to install and run Pinmoli
-- The 12 tools (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests, replay_session, start_call, send_audio, receive_audio, end_call)
+- The 13 tools (sip_test, webrtc_test, generate_audio, analyze_failure, save_test, load_test, list_tests, replay_session, start_call, send_audio, receive_audio, end_call, play_audio)
 - Common workflows (test endpoint, make call, debug failure, save config)
 - Troubleshooting (agent not calling tools, socket errors, timeouts)
 - Best practices (when to use, good test requests, naming conventions)
@@ -294,7 +294,7 @@ gemini "Test sip:example.com with OPTIONS"
    - Live-test env vars (`LIVEKIT_URL`, `LIVEKIT_SIP_ENDPOINT`, `LIVEKIT_PHONE`)
    - Lint/test/type-check commands (`npm test`, `npm run test:live`, `npm run lint`, `tsc --noEmit`)
 
-2. **The 12 Tools**
+2. **The 13 Tools**
    - sip_test, webrtc_test, generate_audio, analyze_failure
    - save_test, load_test, list_tests, replay_session
    - start_call, send_audio, receive_audio, end_call
@@ -337,7 +337,7 @@ gemini "Test sip:example.com with OPTIONS"
    - Start minimal (YAGNI)
    - Use TypeBox for validation
    - Guard resource cleanup
-   - 12 tools only (no dynamic registration)
+   - 13 tools only (no dynamic registration)
 
 3. **File Structure**
    - src/ organization (sip/, webrtc/, tools/, ui/, storage/)

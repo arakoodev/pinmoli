@@ -16,9 +16,10 @@ import { startCallTool } from './start-call.js';
 import { sendAudioTool } from './send-audio.js';
 import { receiveAudioTool } from './receive-audio.js';
 import { endCallTool } from './end-call.js';
+import { playAudioTool } from './play-audio.js';
 
 /**
- * Register all tools (SIP + WebRTC + replay + interactive call)
+ * Register all tools (SIP + WebRTC + replay + interactive call + playback)
  * This is the only way to register tools - no dynamic registration
  */
 export function registerAllTools(): void {
@@ -34,6 +35,7 @@ export function registerAllTools(): void {
   registerTool(sendAudioTool);
   registerTool(receiveAudioTool);
   registerTool(endCallTool);
+  registerTool(playAudioTool);
 }
 
 /**
@@ -55,4 +57,5 @@ export {
   sendAudioTool,
   receiveAudioTool,
   endCallTool,
+  playAudioTool,
 };

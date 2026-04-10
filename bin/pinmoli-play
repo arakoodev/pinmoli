@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+#
+# pinmoli-play — Play Pinmoli WAV files on the host with terminal visualization.
+#
+# Wrapper around bin/pinmoli-play.mjs (built inside Docker via esbuild).
+# Runs OUTSIDE Docker on the host where speakers are accessible.
+#
+# Usage:
+#   ./bin/pinmoli-play <file-or-sample>      Play with waveform visualization
+#   ./bin/pinmoli-play --list                List WAVs in latest session
+#   ./bin/pinmoli-play --info <file>         Show file info
+#
+# Build:
+#   docker compose exec pinmoli npm run build:play
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BUNDLE="$SCRIPT_DIR/pinmoli-play.mjs"
+
+if [[ ! -f "$BUNDLE" ]]; then
+  echo "Error: $BUNDLE not found." >&2
+  echo "" >&2
+  echo "Build it first:" >&2
+  echo "  docker compose exec pinmoli npm run build:play" >&2
+  exit 1
+fi
+
+if ! command -v node &>/dev/null; then
+  echo "Error: node not found on PATH." >&2
+  echo "Install Node.js (>= 20) on the host." >&2
+  exit 1
+fi
+
+if ! command -v ffplay &>/dev/null && ! command -v paplay &>/dev/null; then
+  echo "Warning: neither ffplay nor paplay found on host." >&2
+  echo "Install ffmpeg: sudo apt install ffmpeg" >&2
+  echo "" >&2
+fi
+
+exec node "$BUNDLE" "$@"

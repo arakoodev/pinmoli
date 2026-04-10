@@ -9,7 +9,7 @@
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { recordToolCall } from '../network/session.js';
 
-// Allowlist: Only these 12 tools can be registered
+// Allowlist: Only these 13 tools can be registered
 export const ALLOWED_TOOLS = [
   'sip_test',
   'webrtc_test',
@@ -23,6 +23,7 @@ export const ALLOWED_TOOLS = [
   'send_audio',
   'receive_audio',
   'end_call',
+  'play_audio',
 ] as const;
 
 export type AllowedToolName = typeof ALLOWED_TOOLS[number];

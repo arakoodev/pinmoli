@@ -16,6 +16,7 @@ describe('Tool Registry', () => {
       expect(isToolAllowed('send_audio')).toBe(true);
       expect(isToolAllowed('receive_audio')).toBe(true);
       expect(isToolAllowed('end_call')).toBe(true);
+      expect(isToolAllowed('play_audio')).toBe(true);
     });
 
     it('blocks non-SIP tools', () => {
@@ -70,8 +71,8 @@ describe('Tool Registry', () => {
   });
 
   describe('ALLOWED_TOOLS', () => {
-    it('contains exactly 12 tools', () => {
-      expect(ALLOWED_TOOLS).toHaveLength(12);
+    it('contains exactly 13 tools', () => {
+      expect(ALLOWED_TOOLS).toHaveLength(13);
       expect(ALLOWED_TOOLS).toEqual([
         'sip_test',
         'webrtc_test',
@@ -85,6 +86,7 @@ describe('Tool Registry', () => {
         'send_audio',
         'receive_audio',
         'end_call',
+        'play_audio',
       ]);
     });
   });

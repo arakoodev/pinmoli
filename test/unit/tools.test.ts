@@ -22,11 +22,11 @@ afterEach(() => {
 });
 
   describe('Tool Registration', () => {
-    it('registers all 12 tools', () => {
+    it('registers all 13 tools', () => {
       registerAllTools();
       const tools = getAllTools();
 
-      expect(tools).toHaveLength(12);
+      expect(tools).toHaveLength(13);
 
       const toolNames = tools.map(t => t.name);
       expect(toolNames).toContain('sip_test');
@@ -41,6 +41,7 @@ afterEach(() => {
       expect(toolNames).toContain('send_audio');
       expect(toolNames).toContain('receive_audio');
       expect(toolNames).toContain('end_call');
+      expect(toolNames).toContain('play_audio');
     });
   it('registering tools does not initialize storage', () => {
     registerAllTools();

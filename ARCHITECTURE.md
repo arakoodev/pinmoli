@@ -116,7 +116,7 @@ This design makes the engine usable outside the TUI too -- pipe events to NDJSON
 
 General-purpose agents (like OpenClaw) give the LLM access to bash, file I/O, and the full system. That power makes sense for a personal assistant. For a SIP testing tool, it's a liability -- you don't want an LLM accidentally `rm -rf`-ing your project while trying to debug a codec mismatch.
 
-Pinmoli's agent can only call 12 tools, all voice-testing related. The system prompt explicitly forbids filesystem access, and the tool registry enforces the allowlist at runtime. The LLM stays in its lane.
+Pinmoli's agent can only call 13 tools, all voice-testing related. The system prompt explicitly forbids filesystem access, and the tool registry enforces the allowlist at runtime. The LLM stays in its lane.
 
 ## Source Structure
 
