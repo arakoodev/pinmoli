@@ -77,25 +77,40 @@ export async function getAccessToken(): Promise<string> {
 
   const sa = loadServiceAccount();
   const jwt = signJwt(sa);
+  const tokenUri = sa.token_uri || TOKEN_URI;
 
-  const response = await fetch(sa.token_uri || TOKEN_URI, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
-  });
+  // Retry once on timeout (transient network issues, especially in Docker on WSL2)
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await fetch(tokenUri, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
+        signal: AbortSignal.timeout(10000), // 10s timeout (Node 20+)
+      });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Token exchange failed (${response.status}): ${text}`);
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Token exchange failed (${response.status}): ${text}`);
+      }
+
+      const data = await response.json() as { access_token: string; expires_in: number };
+      cachedToken = {
+        accessToken: data.access_token,
+        expiresAt: Date.now() + data.expires_in * 1000,
+      };
+
+      return cachedToken.accessToken;
+    } catch (err) {
+      if (attempt === 0 && (err as Error).name === 'TimeoutError') {
+        // Retry once on timeout
+        continue;
+      }
+      throw err;
+    }
   }
 
-  const data = await response.json() as { access_token: string; expires_in: number };
-  cachedToken = {
-    accessToken: data.access_token,
-    expiresAt: Date.now() + data.expires_in * 1000,
-  };
-
-  return cachedToken.accessToken;
+  throw new Error(`Token exchange timed out after 2 attempts to ${tokenUri}`);
 }
 
 /** Reset cached token and service account (for testing) */
