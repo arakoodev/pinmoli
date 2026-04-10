@@ -14,7 +14,7 @@
 import dgram from 'dgram';
 import { generateCallId, generateTag, buildInviteRequest, buildAckRequest, buildByeRequest, buildCancelRequest } from './protocol.js';
 import { buildSdp, parseSdpAnswer } from './sdp.js';
-import { receiveRTPAudio, saveAsWAV, sendRTPFromSocket, sendDtmfFromSocket, loadAudioSample } from './rtp-receiver.js';
+import { receiveRTPAudio, saveAsWAV, sendRTPFromSocket, sendDtmfFromSocket, loadAudioSample, buildRTPPacket } from './rtp-receiver.js';
 import { transcodePcmuTo, CODEC_TABLE, type CodecInfo } from './codec.js';
 import { DtmfDetector } from './dtmf.js';
 import { storeCall, removeCall, type CallHandle } from './call-store.js';
@@ -283,6 +283,25 @@ export async function openDialog(
     sipSocket.send(ackMessage, port, host, () => resolve());
   });
 
+  // NAT hole-punch: send a short burst of silence RTP immediately after ACK.
+  // SIP signaling and RTP use separate UDP sockets. The NAT mapping for the
+  // RTP socket only opens for return traffic once we send from it. Without
+  // this, symmetric NATs drop the agent's inbound RTP because no outbound
+  // packet has been sent from the RTP port to the remote media address.
+  // 500ms of silence (25 packets × 20ms) is enough to open the pinhole.
+  const silenceValue = negotiatedCodec.name === 'PCMA' ? 0xD5 : 0xFF; // silence byte per codec
+  const silencePacket = Buffer.alloc(negotiatedCodec.packetSize, silenceValue);
+  const silenceData = Buffer.concat(Array.from({ length: 25 }, () => silencePacket));
+  const natPunchState = await sendRTPFromSocket(rtpSocket, silenceData, remoteIp, remotePort, {
+    codec: negotiatedCodec,
+  });
+
+  onEvent({
+    type: 'info',
+    timestamp: Date.now(),
+    message: `NAT hole-punch: sent ${natPunchState.packetsSent} silence packets to ${remoteIp}:${remotePort}`,
+  });
+
   // Build CallHandle
   const maxDuration = config.maxDuration ?? 300;
   const handle: CallHandle = {
@@ -302,7 +321,7 @@ export async function openDialog(
     remotePort,
     rtpPort,
     negotiatedCodec,
-    rtpStreamState: null,
+    rtpStreamState: natPunchState, // continue from NAT hole-punch SSRC/seq/ts
     dtmfDetector: new DtmfDetector(),
     cseqCounter: 2, // INVITE=1, ACK=1, next BYE=2
     session,
@@ -431,10 +450,39 @@ export async function receiveAudio(
     message: `Listening for audio on port ${handle.rtpPort} (${duration}s)...`,
   });
 
+  // Send silence keepalive every 5s during the listen phase to keep NAT pinholes open.
+  // Symmetric NATs expire UDP mappings after 30-60s of inactivity. Without keepalive,
+  // the agent's RTP can't reach us if the mapping expires during a long listen.
+  const silenceValue = handle.negotiatedCodec.name === 'PCMA' ? 0xD5 : 0xFF;
+  const keepalivePkt = Buffer.alloc(handle.negotiatedCodec.packetSize, silenceValue);
+  let keepaliveSeq = handle.rtpStreamState?.sequenceNumber ?? 0;
+  let keepaliveTs = handle.rtpStreamState?.timestamp ?? 0;
+  const keepaliveSsrc = handle.rtpStreamState?.ssrc ?? 0;
+  const keepaliveInterval = setInterval(() => {
+    keepaliveSeq = (keepaliveSeq + 1) & 0xFFFF;
+    keepaliveTs = (keepaliveTs + handle.negotiatedCodec.clockRate / 50) >>> 0;
+    const pkt = buildRTPPacket({
+      payloadType: handle.negotiatedCodec.payloadType,
+      sequenceNumber: keepaliveSeq,
+      timestamp: keepaliveTs,
+      ssrc: keepaliveSsrc,
+      payload: keepalivePkt,
+    });
+    handle.rtpSocket.send(pkt, handle.remotePort, handle.remoteIp);
+  }, 5000);
+  keepaliveInterval.unref();
+
   const result = await receiveRTPAudio(handle.rtpSocket, duration, {
     dtmfDetector: handle.dtmfDetector,
     acceptedPayloadTypes: [handle.negotiatedCodec.payloadType],
   });
+
+  clearInterval(keepaliveInterval);
+  // Update stream state so subsequent sends continue cleanly
+  if (handle.rtpStreamState) {
+    handle.rtpStreamState.sequenceNumber = keepaliveSeq;
+    handle.rtpStreamState.timestamp = keepaliveTs;
+  }
 
   handle.turnCounter++;
   const filePath = handle.session.file(`agent-response-${handle.turnCounter}.wav`);
