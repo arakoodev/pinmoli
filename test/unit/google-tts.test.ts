@@ -240,3 +240,70 @@ describe('wrapAudioAsWav', () => {
     expect(wav.readUInt32LE(24)).toBe(8000);
   });
 });
+
+describe('synthesize → wrap integration (prevents the 6× noise bug)', () => {
+  let originalFetch2: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch2 = globalThis.fetch;
+    process.env.GOOGLE_CLOUD_PROJECT = 'test-project';
+    process.env.GOOGLE_CLOUD_LOCATION = 'us-central1';
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch2;
+    delete process.env.GOOGLE_CLOUD_PROJECT;
+    delete process.env.GOOGLE_CLOUD_LOCATION;
+  });
+
+  it('PCM L16 24kHz from Gemini is wrapped as PCM WAV, not mu-law', async () => {
+    // Simulate the exact Gemini TTS response format
+    const fakePcm16 = Buffer.alloc(480); // 10ms of PCM16 24kHz mono
+    for (let i = 0; i < 240; i++) {
+      fakePcm16.writeInt16LE(Math.round(Math.sin(i * 0.1) * 10000), i * 2);
+    }
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [{
+          content: {
+            parts: [{
+              inlineData: {
+                mimeType: 'audio/L16;codec=pcm;rate=24000',
+                data: fakePcm16.toString('base64'),
+              },
+            }],
+          },
+        }],
+      }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const { synthesizeSpeech, wrapAudioAsWav } = await import('../../src/google/tts.js');
+    const result = await synthesizeSpeech('Test');
+    const wav = wrapAudioAsWav(result);
+
+    // WAV header must say PCM (format 1), NOT mu-law (format 7)
+    expect(wav.readUInt16LE(20)).toBe(1);     // PCM format code
+    expect(wav.readUInt16LE(20)).not.toBe(7); // NOT mu-law
+
+    // Sample rate must be 24000, NOT 8000
+    expect(wav.readUInt32LE(24)).toBe(24000);
+    expect(wav.readUInt32LE(24)).not.toBe(8000);
+
+    // Bits per sample: 16, not 8
+    expect(wav.readUInt16LE(34)).toBe(16);
+
+    // Block align: 2 (16-bit mono), not 1 (8-bit)
+    expect(wav.readUInt16LE(32)).toBe(2);
+
+    // Data bytes should be the original PCM16 bytes, not re-encoded
+    expect(wav.subarray(44).length).toBe(fakePcm16.length);
+    expect(wav.subarray(44).equals(fakePcm16)).toBe(true);
+
+    // Duration: 480 bytes / (24000 × 2 bytes/sample) = 0.01s
+    const durationSec = wav.readUInt32LE(40) / (24000 * 2);
+    expect(durationSec).toBeCloseTo(0.01, 2);
+  });
+});

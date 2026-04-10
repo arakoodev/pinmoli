@@ -93,6 +93,7 @@ export default [
       'pinmoli/no-stun-on-sip-socket': 'error',
       'pinmoli/require-rport-in-via': 'error',
       'pinmoli/no-unguarded-post-close-write': 'error',
+      'pinmoli/no-direct-mulaw-wrap': 'error',
     },
   },
 

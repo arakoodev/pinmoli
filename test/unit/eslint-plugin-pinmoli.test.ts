@@ -739,3 +739,32 @@ describe('pinmoli/no-unguarded-post-close-write', () => {
     });
   });
 });
+
+// ---------- Rule 19: no-direct-mulaw-wrap ----------
+
+describe('pinmoli/no-direct-mulaw-wrap', () => {
+  it('flags wrapMulawWav() in tool/consumer code', () => {
+    ruleTester.run('no-direct-mulaw-wrap', plugin.rules['no-direct-mulaw-wrap'], {
+      valid: [
+        // The safe pattern — wrapAudioAsWav checks encoding
+        'wrapAudioAsWav(result)',
+        // wrapPcm16Wav is fine everywhere
+        'wrapPcm16Wav(samples)',
+        // Other function calls not affected
+        'wrapSomethingElse(data)',
+      ],
+      invalid: [
+        // The exact bug: wrapMulawWav in tool code
+        {
+          code: 'wrapMulawWav(samples)',
+          errors: [{ messageId: 'directWrap' }],
+        },
+        // With variable name from API
+        {
+          code: 'const wav = wrapMulawWav(apiResponse)',
+          errors: [{ messageId: 'directWrap' }],
+        },
+      ],
+    });
+  });
+});

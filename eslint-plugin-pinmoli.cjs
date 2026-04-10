@@ -1114,6 +1114,54 @@ const plugin = {
         };
       },
     },
+
+    /* ------------------------------------------------------------------ */
+    /* Rule 19 — pinmoli/no-direct-mulaw-wrap                              */
+    /*                                                                    */
+    /* wrapMulawWav() is a low-level helper that wraps raw bytes in a     */
+    /* mu-law WAV header. Calling it with PCM16 bytes (e.g. from Gemini   */
+    /* TTS which returns audio/L16 24kHz) produces garbled noise —        */
+    /* the header lies about the format, and 24kHz audio plays at 8kHz.   */
+    /*                                                                    */
+    /* Tool code must use wrapAudioAsWav(result) which reads the actual   */
+    /* encoding field from the API response and dispatches correctly.     */
+    /*                                                                    */
+    /* Origin: generate-audio.ts called wrapMulawWav(samples) with PCM16  */
+    /* bytes from Gemini TTS. The output was 6× time-stretched noise —    */
+    /* unintelligible to both humans and the SIP voice agent.             */
+    /* ------------------------------------------------------------------ */
+    'no-direct-mulaw-wrap': {
+      meta: {
+        type: 'problem',
+        docs: {
+          description:
+            'Disallow wrapMulawWav() in tool/consumer code. ' +
+            'Use wrapAudioAsWav() which checks the actual audio encoding.',
+        },
+        schema: [],
+        messages: {
+          directWrap:
+            'wrapMulawWav() wraps bytes as mu-law regardless of their actual encoding. ' +
+            'Gemini TTS returns PCM16 24kHz, not mu-law — wrapping it as mu-law produces ' +
+            '6× time-stretched noise. Use wrapAudioAsWav(result) which reads result.encoding ' +
+            'and dispatches to the correct wrapper.',
+        },
+      },
+      create(context) {
+        return {
+          CallExpression(node) {
+            const callee = node.callee;
+            if (callee.type !== 'Identifier' || callee.name !== 'wrapMulawWav') return;
+
+            // Allow in tts.ts where it's defined as a low-level helper
+            const filename = context.getFilename();
+            if (filename.endsWith('tts.ts') || filename.endsWith('tts.js')) return;
+
+            context.report({ node, messageId: 'directWrap' });
+          },
+        };
+      },
+    },
   },
 };
 
