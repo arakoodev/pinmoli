@@ -32,6 +32,7 @@ export const startCallTool: AgentTool = {
         uri: config.uri,
         codecs: config.codecs ?? ['PCMU'],
         timeout: config.timeout,
+        stunServer: config.stunServer,
       }, emit);
 
       return {

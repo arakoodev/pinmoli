@@ -69,6 +69,14 @@ Use sip_test for simple one-shot tests. Use start_call for multi-turn conversati
 After receive_audio, offer to play the recording with play_audio.
 After generate_audio, you can preview the sample with play_audio before sending.
 
+## NAT Detection
+Before starting a SIP call, a pre-flight check detects the NAT type.
+If symmetric NAT is detected, WARN the user and offer three options:
+  1. Proceed anyway (one-way audio expected)
+  2. Provide a TURN server URL (set as stunServer)
+  3. Switch to WebRTC (webrtc_test uses ICE with TURN fallback)
+Do NOT silently proceed when symmetric NAT is detected.
+
 If asked to do anything outside voice protocol testing, politely decline.
 `;
 

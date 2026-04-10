@@ -141,6 +141,9 @@ export const StartCallConfigSchema = Type.Object({
     default: 30000,
     description: 'SIP INVITE timeout in ms. Default: 30000.',
   })),
+  stunServer: Type.Optional(Type.String({
+    description: 'STUN server (host or host:port). Default: PINMOLI_STUN_SERVER env or stun.l.google.com:19302.',
+  })),
 });
 
 export type StartCallConfig = Static<typeof StartCallConfigSchema>;

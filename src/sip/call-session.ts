@@ -19,6 +19,7 @@ import { transcodePcmuTo, CODEC_TABLE, type CodecInfo } from './codec.js';
 import { DtmfDetector } from './dtmf.js';
 import { storeCall, removeCall, type CallHandle } from './call-store.js';
 import { createSession } from '../network/session.js';
+import { runPreflight, resolveStunConfig } from '../network/preflight.js';
 import type { TestEvent } from '../validation/schemas.js';
 
 export interface OpenDialogConfig {
@@ -27,6 +28,8 @@ export interface OpenDialogConfig {
   timeout?: number;
   mediaPort?: number; // 0 = random (default)
   maxDuration?: number; // seconds, default 300
+  stunServer?: string; // STUN server (host or host:port). Default: PINMOLI_STUN_SERVER env or stun.l.google.com
+  skipPreflight?: boolean; // Skip NAT type detection (e.g. user chose "proceed anyway")
 }
 
 function generateSdp(codecs: readonly string[], mediaPort: number, localIp: string): string {
@@ -68,6 +71,29 @@ export async function openDialog(
     message: `Resolved: ${host}:${port} — session: ${session.name}`,
   });
 
+  // Pre-flight: DNS + STUN + NAT type detection (unless skipped)
+  if (!config.skipPreflight) {
+    const preflight = await runPreflight(host, config.stunServer);
+    for (const diag of preflight.diagnostics) {
+      onEvent({ type: 'info', timestamp: Date.now(), message: `[preflight] ${diag}` });
+    }
+    if (preflight.natType === 'symmetric') {
+      onEvent({
+        type: 'info',
+        timestamp: Date.now(),
+        message: '[preflight] WARNING: Symmetric NAT detected — inbound RTP will likely fail. ' +
+          'Consider using WebRTC (webrtc_test) or a TURN relay.',
+        severity: 'warning',
+      });
+    }
+    if (!preflight.sipHostResolved) {
+      throw new Error(`DNS resolution failed for ${host}`);
+    }
+  }
+
+  // Resolve STUN config
+  const stun = resolveStunConfig(config.stunServer);
+
   // Create separate sockets for SIP signaling and RTP media
   const sipSocket = dgram.createSocket('udp4');
   const rtpSocket = dgram.createSocket('udp4');
@@ -94,15 +120,15 @@ export async function openDialog(
     });
   });
 
-  // STUN-discover NAT-mapped address for the RTP socket only
-  const rtpStun = await stunDiscoverAddress(rtpSocket);
+  // STUN-discover NAT-mapped address for the RTP socket
+  const rtpStun = await stunDiscoverAddress(rtpSocket, stun.server, stun.port);
   const publicIp = rtpStun.ip;
   const rtpPort = rtpStun.port;
 
   onEvent({
     type: 'info',
     timestamp: Date.now(),
-    message: `Public IP: ${publicIp}, RTP mapped to ${publicIp}:${rtpPort} (STUN), SIP via rport on local :${sipPort}`,
+    message: `Public IP: ${publicIp}, RTP mapped to ${publicIp}:${rtpPort} (STUN via ${stun.server}), SIP via rport on local :${sipPort}`,
   });
 
   // Build INVITE
