@@ -241,6 +241,79 @@ describe('wrapAudioAsWav', () => {
   });
 });
 
+describe('callGenerateContent auth paths', () => {
+  let originalFetch3: typeof globalThis.fetch;
+  let originalApiKey: string | undefined;
+  let originalProject: string | undefined;
+
+  beforeEach(() => {
+    originalFetch3 = globalThis.fetch;
+    originalApiKey = process.env.GEMINI_API_KEY;
+    originalProject = process.env.GOOGLE_CLOUD_PROJECT;
+    process.env.GOOGLE_CLOUD_PROJECT = 'test-project';
+    process.env.GOOGLE_CLOUD_LOCATION = 'us-central1';
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch3;
+    if (originalApiKey !== undefined) process.env.GEMINI_API_KEY = originalApiKey;
+    else delete process.env.GEMINI_API_KEY;
+    if (originalProject !== undefined) process.env.GOOGLE_CLOUD_PROJECT = originalProject;
+    else delete process.env.GOOGLE_CLOUD_PROJECT;
+  });
+
+  it('uses generativelanguage.googleapis.com when GEMINI_API_KEY is set', async () => {
+    process.env.GEMINI_API_KEY = 'test-api-key-123';
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const { callGenerateContent } = await import('../../src/google/gemini-rest.js');
+    await callGenerateContent('test-model', { contents: [] });
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain('generativelanguage.googleapis.com');
+    expect(url).toContain('key=test-api-key-123');
+    expect(url).not.toContain('aiplatform.googleapis.com');
+  });
+
+  it('uses aiplatform.googleapis.com when only Vertex AI is configured', async () => {
+    delete process.env.GEMINI_API_KEY;
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const { callGenerateContent } = await import('../../src/google/gemini-rest.js');
+    await callGenerateContent('test-model', { contents: [] });
+
+    const [url, options] = mockFetch.mock.calls[0];
+    expect(url).toContain('aiplatform.googleapis.com');
+    expect(url).toContain('test-project');
+    expect(options.headers.Authorization).toContain('Bearer');
+  });
+
+  it('prefers API key over Vertex AI when both are set', async () => {
+    process.env.GEMINI_API_KEY = 'api-key-wins';
+    process.env.GOOGLE_CLOUD_PROJECT = 'vertex-project';
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const { callGenerateContent } = await import('../../src/google/gemini-rest.js');
+    await callGenerateContent('test-model', { contents: [] });
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain('generativelanguage.googleapis.com');
+    expect(url).toContain('key=api-key-wins');
+  });
+});
+
 describe('synthesize → wrap integration (prevents the 6× noise bug)', () => {
   let originalFetch2: typeof globalThis.fetch;
 

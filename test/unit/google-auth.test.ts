@@ -147,4 +147,63 @@ describe('Google Auth', () => {
 
     await expect(getAccessToken()).rejects.toThrow('Token exchange failed (401)');
   });
+
+  it('retries once on timeout then fails', async () => {
+    // Both attempts timeout
+    const timeoutErr = new DOMException('The operation was aborted', 'TimeoutError');
+    Object.defineProperty(timeoutErr, 'name', { value: 'TimeoutError' });
+    const mockFetch = vi.fn().mockRejectedValue(timeoutErr);
+    globalThis.fetch = mockFetch;
+
+    const { getAccessToken } = await import('../../src/google/auth.js');
+
+    await expect(getAccessToken()).rejects.toThrow();
+    // Should have been called twice (initial + 1 retry)
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('succeeds on retry after first timeout', async () => {
+    const timeoutErr = new DOMException('The operation was aborted', 'TimeoutError');
+    Object.defineProperty(timeoutErr, 'name', { value: 'TimeoutError' });
+    const mockFetch = vi.fn()
+      .mockRejectedValueOnce(timeoutErr)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ access_token: 'retry-token', expires_in: 3600 }),
+      });
+    globalThis.fetch = mockFetch;
+
+    const { getAccessToken } = await import('../../src/google/auth.js');
+    const token = await getAccessToken();
+
+    expect(token).toBe('retry-token');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('does NOT retry on non-timeout errors', async () => {
+    const networkErr = new Error('ECONNREFUSED');
+    const mockFetch = vi.fn().mockRejectedValue(networkErr);
+    globalThis.fetch = mockFetch;
+
+    const { getAccessToken } = await import('../../src/google/auth.js');
+
+    await expect(getAccessToken()).rejects.toThrow('ECONNREFUSED');
+    // Only 1 call — no retry for non-timeout
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses AbortSignal.timeout in fetch call', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ access_token: 'test', expires_in: 3600 }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const { getAccessToken } = await import('../../src/google/auth.js');
+    await getAccessToken();
+
+    // Verify signal was passed to fetch
+    const [, options] = mockFetch.mock.calls[0];
+    expect(options.signal).toBeDefined();
+  });
 });
