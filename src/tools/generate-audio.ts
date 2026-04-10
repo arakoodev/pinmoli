@@ -222,8 +222,8 @@ async function generateSilence(output: string, duration: number, codec: CodecInf
 async function generateSpeech(output: string, text: string, codec: CodecInfo, ttsProvider?: string, language?: string, voice?: string): Promise<boolean> {
   // Gemini TTS path — high quality, Vertex AI only
   if (ttsProvider === 'gemini') {
-    if (!isVertexConfigured()) {
-      throw new Error('Gemini TTS requires Vertex AI. Configure with --service-account or GOOGLE_APPLICATION_CREDENTIALS.');
+    if (!isVertexConfigured() && !process.env.GEMINI_API_KEY) {
+      throw new Error('Gemini TTS requires Vertex AI (--service-account) or GEMINI_API_KEY.');
     }
     const { synthesizeSpeech, wrapAudioAsWav } = await import('../google/tts.js');
 
