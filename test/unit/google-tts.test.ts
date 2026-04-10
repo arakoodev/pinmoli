@@ -241,6 +241,52 @@ describe('wrapAudioAsWav', () => {
   });
 });
 
+describe('Gemini TTS auth gate (prevents host-only regression)', () => {
+  it('GEMINI_API_KEY alone allows TTS — does not require Vertex AI', async () => {
+    // This test prevents regression of the isVertexConfigured() gate
+    // that blocked TTS when only GEMINI_API_KEY was set (no service account).
+    const origKey = process.env.GEMINI_API_KEY;
+    const origCreds = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    const origProject = process.env.GOOGLE_CLOUD_PROJECT;
+
+    try {
+      process.env.GEMINI_API_KEY = 'test-key';
+      delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+      delete process.env.GOOGLE_CLOUD_PROJECT;
+
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { parts: [{ inlineData: {
+            mimeType: 'audio/L16;codec=pcm;rate=24000',
+            data: Buffer.from([0x00, 0x01]).toString('base64'),
+          } }] } }],
+        }),
+      });
+      globalThis.fetch = mockFetch;
+
+      const { synthesizeSpeech } = await import('../../src/google/tts.js');
+      const result = await synthesizeSpeech('Test');
+
+      // Should succeed — NOT throw "requires Vertex AI"
+      expect(result.samples).toBeDefined();
+      expect(result.encoding).toBe('pcm16');
+
+      // Should have used the API key path
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toContain('generativelanguage.googleapis.com');
+      expect(url).toContain('key=test-key');
+    } finally {
+      if (origKey !== undefined) process.env.GEMINI_API_KEY = origKey;
+      else delete process.env.GEMINI_API_KEY;
+      if (origCreds !== undefined) process.env.GOOGLE_APPLICATION_CREDENTIALS = origCreds;
+      else delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+      if (origProject !== undefined) process.env.GOOGLE_CLOUD_PROJECT = origProject;
+      else delete process.env.GOOGLE_CLOUD_PROJECT;
+    }
+  });
+});
+
 describe('callGenerateContent auth paths', () => {
   let originalFetch3: typeof globalThis.fetch;
   let originalApiKey: string | undefined;
