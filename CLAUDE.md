@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 2. **Failure is acceptable. Misrepresenting results is not.** If something doesn't work, say so. Don't spin partial results as success. Don't optimize for appearing successful — optimize for accuracy.
 3. **When asked to run tests, run the actual tests.** Don't substitute a different test script and present it as equivalent. If TUI tests exist, run the TUI tests. If integration tests exist, run the integration tests. Don't write new ad-hoc scripts when existing test infrastructure already covers the case.
 4. **Distinguish between "code compiles" and "feature works".** A clean build and passing unit tests prove correctness of isolated functions. They do not prove the feature works end-to-end against a real endpoint.
-5. **EVERYTHING runs inside Docker. Non-negotiable.** Never run tests, builds, type-checks, or the TUI on the local laptop. The container has ffmpeg, espeak-ng, and other dependencies that don't exist locally. Running outside Docker gives misleading results. Use `docker compose exec` or `docker compose run` for ALL commands: `npm test`, `npx tsc --noEmit`, `npx tsx`, `node`, etc. If the container isn't running, start it with `docker compose up -d` first. There are zero exceptions to this rule.
+5. **Build and test inside Docker. Run on host when possible.** Docker has ffmpeg, espeak-ng, and controlled dependencies for reproducible builds and tests. Use `docker compose exec` for `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build:play`. Run the actual Pinmoli CLI on the host for direct network access (no NAT issues with `network_mode: host`) and speaker access (audio playback). The host needs Node.js (≥20) and ffmpeg.
 
 ## Project Overview
 
@@ -16,43 +16,46 @@ Pinmoli — "Postman for Voice". An AI-powered CLI for testing SIP and WebRTC vo
 
 ## Commands
 
-**ALL commands run inside Docker. No exceptions.**
+### Build & Test (Docker)
 
 ```bash
-# Start the container
-docker compose up -d
-
-# Run the TUI interactively
-docker compose exec pinmoli npx tsx src/cli.ts
-
-# Type-check
-docker compose exec pinmoli npx tsc --noEmit
-
-# Run the default test suite (unit + integration)
-docker compose exec pinmoli npm test
-
-# Run unit tests only
-docker compose exec pinmoli npx vitest run test/unit/
-
-# Run integration tests only
-docker compose exec pinmoli npx vitest run test/integration/
-
-# Run live tests (hits real LiveKit endpoint)
-docker compose exec pinmoli npm run test:live
-
-# Lint
-docker compose exec pinmoli npm run lint
-
-# Rebuild container after Dockerfile or dependency changes
-docker compose build && docker compose up -d
+docker compose up -d                                          # start container
+docker compose exec pinmoli npx tsc --noEmit                  # type-check
+docker compose exec pinmoli npm test                          # unit + integration tests
+docker compose exec pinmoli npx vitest run test/unit/         # unit tests only
+docker compose exec pinmoli npx vitest run test/integration/  # integration tests only
+docker compose exec pinmoli npm run test:live                 # live tests (real endpoints)
+docker compose exec pinmoli npm run lint                      # lint (19 rules)
+docker compose exec pinmoli npm run build:play                # bundle pinmoli-play for host
+docker compose build && docker compose up -d                  # rebuild after dep changes
 ```
 
-**Port 5060 conflict:** Only one process can bind port 5060. If running sip-engine directly while the dev server is up, kill the conflicting process first (`kill $(lsof -ti:5060)` inside the container).
+### Run (host — preferred)
+
+```bash
+npx tsx src/cli.ts                                            # interactive TUI
+npx tsx src/cli-pipe.ts                                       # pipe mode (stdin→agent→stdout)
+npx tsx src/cli-replay.ts captures/<session-id>               # replay a recorded session
+npx tsx src/cli-replay-snapshot.ts captures/<session-id>       # replay interactive call snapshots
+npx tsx src/cli-livekit-diag.ts                               # LiveKit SIP diagnostics
+./bin/pinmoli-play <file-or-sample>                           # play audio with visualization
+```
+
+Host requires: Node.js ≥20, ffmpeg. Install with `npm install` on the host if node_modules is missing.
+
+### Run (Docker — fallback)
+
+```bash
+docker compose exec pinmoli npx tsx src/cli.ts                # if host lacks ffmpeg/espeak
+docker compose exec -T pinmoli npx tsx src/cli-pipe.ts        # pipe mode in container
+```
 
 ## Architecture
 
-### Docker stack (`docker-compose.yml`)
-- **pinmoli**: Node.js 20 Alpine container with ffmpeg, espeak, tcpdump, tini. `network_mode: host` for SIP/RTP access. Automatic pcap capture via `entrypoint.sh`.
+### Docker (build/test only)
+- Node.js 20 Alpine container with ffmpeg, espeak, tcpdump, tini
+- `network_mode: host` for SIP/RTP access when running inside Docker
+- Automatic pcap capture via `entrypoint.sh`
 
 ### Source (`src/`)
 - `cli.ts` — Entry point, interactive TUI REPL, multi-provider auto-detection
@@ -71,7 +74,7 @@ docker compose build && docker compose up -d
 - `webrtc/audio-frames.ts` — PCM16 frame chunking, OGG Opus builder/decoder, codec-aware WAV save
 - `google/auth.ts` — Google Cloud OAuth2 via service account JWT (zero npm deps, `crypto.createSign`)
 - `google/gemini-rest.ts` — Vertex AI `generateContent` REST client (shared by TTS and future STT)
-- `google/tts.ts` — Gemini TTS: `synthesizeSpeech()` returns raw MULAW, `wrapMulawWav()` for WAV container
+- `google/tts.ts` — Gemini TTS: `synthesizeSpeech()` returns `SynthesizeResult` (PCM16 24kHz from API), `wrapAudioAsWav()` for correct WAV container
 - `network/utils.ts` — STUN NAT discovery (`stunDiscoverAddress()`), `getLocalIp()`, `getPublicIp()`
 - `network/session.ts` — Per-session directory, signaling log, metadata, manifest (SessionManifest/ToolCallRecord for replay)
 - `network/flow.ts` — Flow recording from engine TestEvents: `buildFlowFromEvents()` → FlowRecord, `writeFlowJson()`, `readFlowJson()`, `compareFlows()`
@@ -105,7 +108,7 @@ Custom ESLint plugin at `eslint-plugin-pinmoli.cjs` with 18 rules extracted from
 - **`pinmoli/no-stun-on-sip-socket`** — `stunDiscoverAddress()` on a SIP/signaling socket is wrong. SIP uses `rport` (RFC 3581), not STUN. STUN timeout falls back to private IP in Via/Contact
 - **`pinmoli/require-rport-in-via`** — Via headers must include `;rport`. RFC 3581 — without it, server may route responses to the wrong port behind NAT
 
-Run `docker compose exec pinmoli npm run lint` before committing.
+Run lint before committing: `docker compose exec pinmoli npm run lint` (or `npm run lint` on host if node_modules installed).
 
 ## Key Configuration
 
